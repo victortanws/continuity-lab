@@ -4,6 +4,11 @@ import type {
   CoverageAssessment,
   EvidenceChunk,
 } from "./contracts";
+import {
+  exactRelationCueDirection,
+  exactRelationEndpointsMatch,
+  exactRelationSupportIsAdmissible,
+} from "./exact-relation";
 
 export const QUESTION_GRAPH_VERSION = "continuity.question-graph.v1" as const;
 
@@ -17,6 +22,11 @@ export const QUESTION_GRAPH_LIMITS = Object.freeze({
   defaultNodes: 72,
   defaultEdges: 144,
   defaultDepth: 3,
+  maxEvidenceTextBytes: 64 * 1024,
+  maxEvidenceFieldLength: 4_096,
+  maxEntityCandidatesPerEvidence: 64,
+  maxEntityAliasesPerCandidate: 32,
+  maxEntityFieldLength: 512,
 } as const);
 
 export type QuestionGraphNodeKind = "entity" | "claim" | "event" | "constraint" | "evidence";
@@ -64,11 +74,27 @@ export type QuestionGraphSemanticRecord = {
   temporal?: { axis: string; order: number } | null;
 };
 
+/**
+ * Exact-ID relation used at untrusted compiler boundaries. Unlike the
+ * claim-key semantic record above, every endpoint and the relation's own
+ * provenance must resolve to admitted atomic evidence.
+ */
+export type QuestionGraphSemanticEdgeRecord = {
+  evidenceId: string;
+  fromEvidenceId: string;
+  toEvidenceId: string;
+  cue: string;
+  cueStart: number;
+  cueEnd: number;
+  relation: Extract<QuestionGraphRelation, "precondition" | "consequence" | "temporal_before">;
+};
+
 export type QuestionGraphBuildRequest = {
   projectId: string;
   projectRevision: string;
   evidence: EvidenceChunk[];
   semanticRecords?: QuestionGraphSemanticRecord[];
+  semanticEdges?: QuestionGraphSemanticEdgeRecord[];
   /** Must come from the trusted authority router, not uploaded source prose. */
   coverage?: Pick<
     CoverageAssessment,
@@ -91,6 +117,8 @@ export type QuestionGraphBuildReceipt = {
   rejectedEvidence: number;
   semanticRecordsAdmitted: number;
   semanticRecordsRejected: number;
+  semanticEdgesAdmitted: number;
+  semanticEdgesRejected: number;
   unresolvedReferencedNodes: number;
   totalNodes: number;
   totalEdges: number;
@@ -188,9 +216,13 @@ export function buildQuestionGraph(request: QuestionGraphBuildRequest): Question
   if (semanticRecords.length > QUESTION_GRAPH_LIMITS.maxSemanticRecords) {
     throw new QuestionGraphInputError(`Semantic records exceed the ${QUESTION_GRAPH_LIMITS.maxSemanticRecords}-record graph limit.`);
   }
+  const semanticEdges = request.semanticEdges ?? [];
+  if (semanticEdges.length > QUESTION_GRAPH_LIMITS.maxSemanticRecords) {
+    throw new QuestionGraphInputError(`Semantic edges exceed the ${QUESTION_GRAPH_LIMITS.maxSemanticRecords}-record graph limit.`);
+  }
 
   const atomicEvidence = request.evidence
-    .filter(isAdmissibleAtomicEvidence)
+    .filter((item) => isAdmissibleAtomicEvidence(item, request.projectId))
     .slice()
     .sort(compareEvidence);
   const evidenceById = new Map(atomicEvidence.map((item) => [item.id, item]));
@@ -198,12 +230,19 @@ export function buildQuestionGraph(request: QuestionGraphBuildRequest): Question
   const nodes = new Map<string, MutableNode>();
   const edges = new Map<string, QuestionGraphEdge>();
   const assertionByEvidenceId = new Map<string, MutableNode>();
+  const temporalDomainByNodeId = new Map<string, string>();
   let recordsAdmitted = 0;
   let recordsRejected = 0;
+  let semanticEdgesAdmitted = 0;
+  let semanticEdgesRejected = 0;
 
   for (const record of semanticRecords) {
     if (evidenceById.has(record.evidenceId) && validSemanticRecord(record)) recordsAdmitted += 1;
     else recordsRejected += 1;
+  }
+  for (const record of semanticEdges) {
+    if (validSemanticEdgeRecord(record, evidenceById)) semanticEdgesAdmitted += 1;
+    else semanticEdgesRejected += 1;
   }
 
   for (const evidence of atomicEvidence) {
@@ -219,6 +258,7 @@ export function buildQuestionGraph(request: QuestionGraphBuildRequest): Question
     const records = recordsByEvidence.get(evidence.id) ?? [];
     const primary = records[0];
     const assertionKind = primary?.assertionKind ?? inferAssertionKind(evidence);
+    const assertionTemporal = primary?.temporal ?? temporalOf(evidence);
     const assertion = upsertNode(nodes, {
       id: nodeId(assertionKind, scopedClaimKey(evidence)),
       kind: assertionKind,
@@ -226,8 +266,9 @@ export function buildQuestionGraph(request: QuestionGraphBuildRequest): Question
       label: primary?.label?.trim() || evidence.text.trim(),
       evidenceIds: [evidence.id],
       grounding: "grounded",
-      temporal: primary?.temporal ?? temporalOf(evidence),
+      temporal: assertionTemporal,
     });
+    if (assertionTemporal) temporalDomainByNodeId.set(assertion.id, temporalDomainOf(evidence));
     assertionByEvidenceId.set(evidence.id, assertion);
     addEdge(edges, evidence.polarity === "negative" ? "contradicts" : "supports", evidenceNode.id, assertion.id, [evidence.id]);
 
@@ -243,6 +284,13 @@ export function buildQuestionGraph(request: QuestionGraphBuildRequest): Question
       );
     }
 
+  }
+
+  for (const record of semanticEdges) {
+    if (!validSemanticEdgeRecord(record, evidenceById)) continue;
+    const from = assertionByEvidenceId.get(record.fromEvidenceId);
+    const to = assertionByEvidenceId.get(record.toEvidenceId);
+    if (from && to) addEdge(edges, record.relation, from.id, to.id, [record.evidenceId]);
   }
 
   // Resolve semantic edges only after every grounded assertion exists. This
@@ -267,7 +315,7 @@ export function buildQuestionGraph(request: QuestionGraphBuildRequest): Question
   }
 
   markConflictedNodes(nodes, edges);
-  addTemporalEdges(nodes, edges);
+  addTemporalEdges(nodes, edges, temporalDomainByNodeId);
   const nodeList = [...nodes.values()].map(freezeNode).sort(compareNodes);
   const edgeList = [...edges.values()].sort(compareEdges);
   if (nodeList.length > QUESTION_GRAPH_LIMITS.maxNodes) {
@@ -289,6 +337,8 @@ export function buildQuestionGraph(request: QuestionGraphBuildRequest): Question
       rejectedEvidence: request.evidence.length - atomicEvidence.length,
       semanticRecordsAdmitted: recordsAdmitted,
       semanticRecordsRejected: recordsRejected,
+      semanticEdgesAdmitted,
+      semanticEdgesRejected,
       unresolvedReferencedNodes: nodeList.filter((node) => node.grounding === "referenced").length,
       totalNodes: nodeList.length,
       totalEdges: edgeList.length,
@@ -388,16 +438,43 @@ export class QuestionGraphInputError extends Error {
 
 type MutableNode = QuestionGraphNode;
 
-function isAdmissibleAtomicEvidence(evidence: EvidenceChunk): boolean {
+function isAdmissibleAtomicEvidence(evidence: EvidenceChunk, projectId: string): boolean {
+  const candidates = evidence.entityCandidates ?? [];
   return Boolean(
-    evidence.id.trim()
-    && evidence.sourceVersionId.trim()
-    && evidence.claimKey?.trim()
-    && evidence.claimKind
-    && evidence.polarity
+    evidence.projectId === projectId
+    && boundedString(evidence.id)
+    && boundedString(evidence.sourceVersionId)
+    && boundedString(evidence.sourceId)
+    && boundedString(evidence.title)
+    && boundedString(evidence.locator)
+    && boundedString(evidence.claimKey)
+    && typeof evidence.text === "string"
+    && new TextEncoder().encode(evidence.text).byteLength <= QUESTION_GRAPH_LIMITS.maxEvidenceTextBytes
+    && typeof evidence.claimKind === "string"
+    && ["identity", "normative", "configured", "implemented", "tested", "observed", "causal", "historical"].includes(evidence.claimKind)
+    && (evidence.polarity === "positive" || evidence.polarity === "negative")
+    && Array.isArray(candidates)
+    && candidates.length <= QUESTION_GRAPH_LIMITS.maxEntityCandidatesPerEvidence
+    && candidates.every(validEntityCandidate)
     && !evidence.flags?.includes("compiled_context_only")
     && !evidence.flags?.includes("possible_prompt_injection"),
   );
+}
+
+function boundedString(value: unknown): value is string {
+  return typeof value === "string" && Boolean(value.trim())
+    && value.length <= QUESTION_GRAPH_LIMITS.maxEvidenceFieldLength;
+}
+
+function validEntityCandidate(candidate: CompiledEntityCandidate): boolean {
+  return Boolean(candidate && typeof candidate === "object")
+    && [candidate.id, candidate.name, candidate.type, candidate.mention, candidate.referentKey]
+      .every((value) => typeof value === "string" && Boolean(value.trim())
+        && value.length <= QUESTION_GRAPH_LIMITS.maxEntityFieldLength)
+    && Array.isArray(candidate.aliases)
+    && candidate.aliases.length <= QUESTION_GRAPH_LIMITS.maxEntityAliasesPerCandidate
+    && candidate.aliases.every((alias) => typeof alias === "string"
+      && alias.length <= QUESTION_GRAPH_LIMITS.maxEntityFieldLength);
 }
 
 function inferAssertionKind(evidence: EvidenceChunk): "claim" | "event" | "constraint" {
@@ -409,10 +486,12 @@ function inferAssertionKind(evidence: EvidenceChunk): "claim" | "event" | "const
 function scopedClaimKey(evidence: EvidenceChunk): string {
   const scope = evidence.assertionScope ?? "project_truth";
   const owner = evidence.assertionOwnerId ?? evidence.projectId;
+  const world = evidence.world?.trim() || "default-world";
+  const epistemicOwner = evidence.epistemicOwner?.trim() || "default-owner";
   const temporalFrame = evidence.temporalAxis && typeof evidence.validFromOrder === "number"
     ? `${evidence.temporalAxis}:${evidence.validFromOrder}:${evidence.validToOrder ?? evidence.validFromOrder}`
     : "unscoped-time";
-  return `${scope}\u0000${owner}\u0000${temporalFrame}\u0000${evidence.claimKey}`;
+  return `${scope}\u0000${owner}\u0000${world}\u0000${epistemicOwner}\u0000${temporalFrame}\u0000${evidence.claimKey}`;
 }
 
 function nodeId(kind: QuestionGraphNodeKind, key: string): string {
@@ -527,6 +606,7 @@ function groupSemanticRecords(
 }
 
 function validSemanticRecord(record: QuestionGraphSemanticRecord): boolean {
+  if (!record || typeof record !== "object" || typeof record.evidenceId !== "string") return false;
   const relations = [
     ...(record.mentionsEntityIds ?? []),
     ...(record.preconditionClaimKeys ?? []),
@@ -534,9 +614,85 @@ function validSemanticRecord(record: QuestionGraphSemanticRecord): boolean {
   ];
   return Boolean(record.evidenceId.trim())
     && relations.length <= QUESTION_GRAPH_LIMITS.maxRelationsPerRecord
-    && relations.every((item) => Boolean(item.trim()) && item.length <= 512)
-    && (!record.label || record.label.length <= 2_000)
-    && (!record.temporal || (Boolean(record.temporal.axis.trim()) && Number.isFinite(record.temporal.order)));
+    && relations.every((item) => typeof item === "string" && Boolean(item.trim()) && item.length <= 512)
+    && (record.label === undefined || (typeof record.label === "string" && record.label.length <= 2_000))
+    && (!record.temporal || (typeof record.temporal.axis === "string"
+      && Boolean(record.temporal.axis.trim()) && Number.isFinite(record.temporal.order)));
+}
+
+function validSemanticEdgeRecord(
+  record: QuestionGraphSemanticEdgeRecord,
+  evidence: Map<string, EvidenceChunk>,
+): boolean {
+  if (!record || typeof record !== "object"
+    || typeof record.evidenceId !== "string"
+    || typeof record.fromEvidenceId !== "string"
+    || typeof record.toEvidenceId !== "string") return false;
+  const support = evidence.get(record.evidenceId);
+  const from = evidence.get(record.fromEvidenceId);
+  const to = evidence.get(record.toEvidenceId);
+  const cue = typeof record.cue === "string" ? record.cue : "";
+  const cueLocalStart = support && typeof support.quoteStart === "number"
+    ? record.cueStart - support.quoteStart
+    : -1;
+  const cueExact = Boolean(cue)
+    && Number.isSafeInteger(record.cueStart) && Number.isSafeInteger(record.cueEnd)
+    && record.cueEnd - record.cueStart === cue.length
+    && cueLocalStart >= 0
+    && support?.text.slice(cueLocalStart, cueLocalStart + cue.length) === cue;
+  const nested = support && from && to
+    && support.sourceVersionId === from.sourceVersionId
+    && support.sourceVersionId === to.sourceVersionId
+    && typeof support.quoteStart === "number" && typeof support.quoteEnd === "number"
+    && typeof from.quoteStart === "number" && typeof from.quoteEnd === "number"
+    && typeof to.quoteStart === "number" && typeof to.quoteEnd === "number"
+    && from.quoteStart >= support.quoteStart && from.quoteEnd <= support.quoteEnd
+    && to.quoteStart >= support.quoteStart && to.quoteEnd <= support.quoteEnd;
+  const sameDomain = support && from && to
+    && sameAssertionDomain(support, from)
+    && sameAssertionDomain(support, to);
+  const direction = exactRelationCueDirection(cue, record.relation);
+  const directionAnchored = direction && support && from && to
+    ? exactRelationEndpointsMatch(
+      direction,
+      { start: record.cueStart, end: record.cueEnd },
+      { start: from.quoteStart!, end: from.quoteEnd! },
+      { start: to.quoteStart!, end: to.quoteEnd! },
+      { start: support!.quoteStart!, text: support!.text },
+      [...evidence.values()]
+        .filter((item) => item.id !== support!.id && item.id !== from.id && item.id !== to.id
+          && item.sourceVersionId === support!.sourceVersionId
+          && sameAssertionDomain(support!, item)
+          && typeof item.quoteStart === "number" && typeof item.quoteEnd === "number")
+        .map((item) => ({ start: item.quoteStart!, end: item.quoteEnd! })),
+    )
+    : false;
+  return Boolean(
+    support
+    && from
+    && to
+    && exactRelationSupportIsAdmissible({
+      claimKind: support.claimKind!,
+      polarity: support.polarity!,
+      text: support.text,
+    })
+    && support.flags?.includes("compiled_atomic_span")
+    && cue.trim() && cue.length <= 512
+    && cueExact
+    && nested
+    && sameDomain
+    && directionAnchored
+    && record.fromEvidenceId !== record.toEvidenceId
+    && ["precondition", "consequence", "temporal_before"].includes(record.relation),
+  );
+}
+
+function sameAssertionDomain(left: EvidenceChunk, right: EvidenceChunk): boolean {
+  return left.projectId === right.projectId
+    && (left.assertionScope ?? "project_truth") === (right.assertionScope ?? "project_truth")
+    && (left.assertionOwnerId ?? left.projectId) === (right.assertionOwnerId ?? right.projectId)
+    && (left.world?.trim() || "default-world") === (right.world?.trim() || "default-world")
+    && (left.epistemicOwner?.trim() || "default-owner") === (right.epistemicOwner?.trim() || "default-owner");
 }
 
 function canonicalRecord(record: QuestionGraphSemanticRecord): string {
@@ -554,13 +710,29 @@ function temporalOf(evidence: EvidenceChunk): QuestionGraphNode["temporal"] {
     : null;
 }
 
-function addTemporalEdges(nodes: Map<string, MutableNode>, edges: Map<string, QuestionGraphEdge>): void {
+function temporalDomainOf(evidence: EvidenceChunk): string {
+  return [
+    evidence.assertionScope ?? "project_truth",
+    evidence.assertionOwnerId ?? evidence.projectId,
+    evidence.world?.trim() || "default-world",
+    evidence.epistemicOwner?.trim() || "default-owner",
+  ].join("\u0000");
+}
+
+function addTemporalEdges(
+  nodes: Map<string, MutableNode>,
+  edges: Map<string, QuestionGraphEdge>,
+  temporalDomainByNodeId: Map<string, string>,
+): void {
   const groups = new Map<string, MutableNode[]>();
   for (const node of nodes.values()) {
     if (!node.temporal || node.kind === "evidence" || node.kind === "entity") continue;
-    const group = groups.get(node.temporal.axis) ?? [];
+    const domain = temporalDomainByNodeId.get(node.id);
+    if (!domain) continue;
+    const groupKey = `${domain}\u0000${node.temporal.axis}`;
+    const group = groups.get(groupKey) ?? [];
     group.push(node);
-    groups.set(node.temporal.axis, group);
+    groups.set(groupKey, group);
   }
   for (const group of groups.values()) {
     const ordered = group.sort((left, right) =>

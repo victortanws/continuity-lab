@@ -99,8 +99,9 @@ For every material source span:
 
 1. retain the exact quote and source-owned locator;
 2. assign one claim kind, atomic claim key, polarity, owner, world, and time;
-3. reject a frame whose subject, relation, and object are not present in the
-   quote in source order;
+3. reject a frame whose subject, relation, and any expressed object are not
+   present in the quote in source order; an objectless frame must be declared
+   intransitive and use one copied predicate token at the end of the quoted clause;
 4. reject polarity reversal and hypothetical language presented as fact;
 5. derive evidence and candidate IDs on the server; and
 6. keep unresolved prose as context rather than invented structure.

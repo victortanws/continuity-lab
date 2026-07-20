@@ -110,11 +110,16 @@ to this evidence-routing product rather than copied as application canon.
 - Its text-packet compiler accepts no credential, verifies caller-proposed
   quotes and entity mentions against exact submitted spans, assigns
   deterministic source-scoped IDs, separates same-name candidates, preserves
-  same-frame disagreement, quarantines instruction-like source text, and keeps
-  corpus coverage open. Rejected proposals cannot enter its question graph.
+  same-frame disagreement, preserves packet-relative source authority,
+  quarantines instruction-like source text, and keeps corpus coverage open.
+  A causal edge additionally requires one accepted positive support span, an
+  allowlisted exact cue, two accepted same-owner endpoint spans, and compatible
+  direction; cross-clause and `or`/`unless` shortcuts are rejected. Rejected
+  proposals cannot enter its project- and size-bounded question graph.
 - Its anonymous public-GitHub inspector accepts only canonical GitHub repository
   identifiers, sends no authorization header, resolves a full commit before
-  reading, reapplies safe-path and secret filters, and is capped per request at
+  reading, reapplies safe-path, secret, and shared source-instruction filters,
+  and is capped per request at
   20 seconds, eight provider calls, six files, 384 KiB read, and 20 KiB returned.
   It has a two-call per-isolate concurrency ceiling, no retry, and consumes one
   conditional service-global D1 reservation before GitHub is contacted. The

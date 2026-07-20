@@ -85,6 +85,13 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
       assert.equal(tool.inputSchema.properties.projectId.maxLength, 128);
     }
   }
+  const compileTool = listed.body.result.tools.find((tool) => tool.name === "continuity_compile_material");
+  assert.equal(compileTool.inputSchema.properties.claims.items.properties.object.minLength, 0);
+  assert.deepEqual(compileTool.inputSchema.properties.claims.items.properties.frameArity.enum, ["transitive", "intransitive"]);
+  assert.match(compileTool.description, /empty object requires frameArity intransitive/i);
+  assert.match(compileTool.description, /relation requires an exact cue and two accepted endpoint spans/i);
+  assert.match(initialized.body.result.instructions, /copy subject, predicate, and any non-empty object byte-for-byte/i);
+  assert.match(initialized.body.result.instructions, /omit explicitId unless that exact ID occurs/i);
 
   const ping = await call({ jsonrpc: "2.0", id: "ping", method: "ping" });
   assert.deepEqual(ping.body.result, {});
@@ -116,6 +123,77 @@ test("uploaded text is exact-span verified through the keyless MCP context tool"
   assert.equal(compiled.body.result.structuredContent.conflicts.length, 1);
   assert.equal(compiled.body.result.structuredContent.route.graphUsed, true);
   assert.ok(compiled.body.result.structuredContent.route.validators.length <= 4);
+});
+
+test("unrelated software-release material admits exact transitive and intransitive claims without invented IDs", async () => {
+  const policy = "Release 3.3 may deploy only after migration M7 completes and test suite T9 passes.";
+  const deployment = "Release 3.3 deployed on July 20.";
+  const migration = "Migration M7 was not completed.";
+  const testResult = "Test suite T9 passed.";
+  const compiled = await call(toolCall("software", "continuity_compile_material", {
+    question: "Is Release 3.3 causally ready to deploy?",
+    documents: [
+      { name: "policy.md", text: policy, authority: "reference" },
+      { name: "release.log", text: `${deployment}\n${migration}\n${testResult}`, authority: "production_record" },
+    ],
+    claims: [
+      {
+        documentName: "policy.md", quote: policy, claimKind: "normative",
+        subject: "Release 3.3", predicate: "may deploy only after",
+        object: "migration M7 completes and test suite T9 passes", polarity: "positive",
+      },
+      {
+        documentName: "policy.md", quote: "Release 3.3 may deploy", claimKind: "normative",
+        subject: "Release 3.3", predicate: "deploy", object: "", frameArity: "intransitive", polarity: "positive",
+      },
+      {
+        documentName: "policy.md", quote: "migration M7 completes", claimKind: "normative",
+        subject: "migration M7", predicate: "completes", object: "", frameArity: "intransitive", polarity: "positive",
+      },
+      {
+        documentName: "policy.md", quote: "test suite T9 passes", claimKind: "normative",
+        subject: "test suite T9", predicate: "passes", object: "", frameArity: "intransitive", polarity: "positive",
+      },
+      {
+        documentName: "release.log", quote: deployment, claimKind: "observed",
+        subject: "Release 3.3", predicate: "deployed", object: "on July 20", polarity: "positive",
+      },
+      {
+        documentName: "release.log", quote: migration, claimKind: "observed",
+        subject: "Migration M7", predicate: "completed", object: "", frameArity: "intransitive", polarity: "negative",
+      },
+      {
+        documentName: "release.log", quote: testResult, claimKind: "tested",
+        subject: "Test suite T9", predicate: "passed", object: "", frameArity: "intransitive", polarity: "positive",
+      },
+    ],
+    relations: [
+      { relation: "precondition", evidenceClaimIndex: 0, fromClaimIndex: 2, toClaimIndex: 1, cue: "only after" },
+      { relation: "precondition", evidenceClaimIndex: 0, fromClaimIndex: 3, toClaimIndex: 1, cue: "only after" },
+    ],
+    entityMentions: [
+      { documentName: "policy.md", quote: policy, mention: "Release 3.3", entityType: "software_release" },
+      { documentName: "policy.md", quote: policy, mention: "migration M7", entityType: "migration" },
+      { documentName: "policy.md", quote: policy, mention: "test suite T9", entityType: "test_suite" },
+    ],
+  }));
+
+  const result = compiled.body.result.structuredContent;
+  assert.equal(compiled.body.result.isError, false);
+  assert.equal(result.claims.length, 7);
+  assert.equal(result.claims.find((claim) => claim.quote === policy)?.authority, "reference");
+  assert.equal(result.claims.filter((claim) => claim.authority === "production_record").length, 3);
+  assert.equal(result.entities.length, 3);
+  assert.equal(result.entities.every((entity) => entity.authority === "reference"), true);
+  assert.equal(result.relations.length, 2);
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.route.path, "question_graph");
+  assert.equal(result.route.graphUsed, true);
+  assert.ok(result.graph.nodes.some((node) => node.kind === "constraint"));
+  assert.equal(result.graph.edges.filter((edge) => edge.relation === "precondition").length, 2);
+  assert.ok(result.relations.every((relation) => relation.truthStatus === "source_assertion" && relation.materialized));
+  assert.ok(result.claims.some((claim) => claim.polarity === "negative"));
+  assert.equal(result.entities.every((entity) => entity.resolution === "candidate"), true);
 });
 
 test("the public-repository MCP tool uses anonymous bounded GitHub reads and pins the commit", async () => {

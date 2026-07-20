@@ -12,6 +12,9 @@ entity mentions. The server then:
 - rejects every quote that is not one contiguous substring of its parent;
 - requires copied frame parts to occur in source order and conservatively
   rejects polarity reversal and explicitly hypothetical language;
+- accepts an objectless frame only when it is explicitly marked intransitive
+  and uses one copied terminal predicate token, so an expressed object cannot
+  be silently discarded;
 - limits the claim kind to the kinds already allowed for that source role;
 - derives claim, evidence, and entity-candidate IDs itself;
 - copies project, source, version, authority, lifecycle, locator, world, owner,

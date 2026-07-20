@@ -15,6 +15,11 @@ import {
   ProviderExecutionError,
   type ProviderExecutionFailureCode,
 } from "./openai";
+import {
+  exactClaimFrameAppearsInOrder,
+  exactClaimFramePolarityMatches,
+  type ExactFrameArity,
+} from "../exact-frame";
 
 const OPENAI_API_BASE = "https://api.openai.com/v1";
 export const EVIDENCE_COMPILER_MODEL = "gpt-5.6-sol";
@@ -38,6 +43,7 @@ type ModelClaim = {
   subject: string;
   predicate: string;
   object: string;
+  frameArity: ExactFrameArity;
   polarity: "positive" | "negative";
   referents: string[];
   temporalMarker: string | null;
@@ -217,12 +223,11 @@ export class OpenAIEvidenceCompiler implements EvidenceCompiler {
         diagnostics.push(`Rejected a non-verbatim claim span proposed for ${entry.parent.id}.`);
         continue;
       }
-      const frameParts = [claim.subject, claim.predicate, claim.object].filter(Boolean);
-      if (!frameCopiedInOrder(claim.quote, frameParts)) {
+      if (!exactClaimFrameAppearsInOrder(claim)) {
         diagnostics.push(`Rejected a claim whose semantic frame was not copied from its quoted span in ${entry.parent.id}.`);
         continue;
       }
-      if (!polarityEntailedByFrame(claim.quote, frameParts, claim.polarity)) {
+      if (!polarityEntailedByFrame(claim, claim.polarity)) {
         diagnostics.push(`Rejected a claim whose proposed polarity was not entailed by its exact sentence in ${entry.parent.id}.`);
         continue;
       }
@@ -302,7 +307,7 @@ export const EVIDENCE_COMPILER_SCHEMA = {
         additionalProperties: false,
         required: [
           "parentEvidenceId", "quote", "claimKind", "subject", "predicate", "object",
-          "polarity", "referents", "temporalMarker", "confidence",
+          "frameArity", "polarity", "referents", "temporalMarker", "confidence",
         ],
         properties: {
           parentEvidenceId: { type: "string" },
@@ -311,6 +316,7 @@ export const EVIDENCE_COMPILER_SCHEMA = {
           subject: { type: "string" },
           predicate: { type: "string" },
           object: { type: "string" },
+          frameArity: { type: "string", enum: ["transitive", "intransitive"] },
           polarity: { type: "string", enum: ["positive", "negative"] },
           referents: { type: "array", items: { type: "string" } },
           temporalMarker: { anyOf: [{ type: "string" }, { type: "null" }] },
@@ -349,7 +355,7 @@ function compilerInstructions(): string {
     "Return an item only when its quote is copied byte-for-byte as one contiguous substring of the named parent fragment.",
     "Extract direct statements, not guesses, implications, world knowledge, missing events, or facts copied from the question.",
     "Use only a claimKind listed in that parent's allowedClaimKinds.",
-    "Make each claim atomic. subject, predicate, and every nonempty object must each be copied byte-for-byte from inside the claim quote. Never paraphrase, canonicalize, or invent a semantic frame. Put only directly expressed negation in polarity.",
+    "Make each claim atomic. subject, predicate, and every nonempty object must each be copied byte-for-byte from inside the claim quote in that order. Never paraphrase, canonicalize, or invent a semantic frame. Use frameArity transitive whenever an object is expressed. Use frameArity intransitive with object \"\" only for one copied predicate token that finishes the quoted clause; never discard an expressed object. Put only directly expressed negation in polarity.",
     "A referent must itself occur inside the claim quote. Preserve two same-named people, systems, records, or objects as separate entity mentions unless an explicit identifier in the source proves identity.",
     "explicitId must be null unless that exact identifier occurs in the entity quote. Names and aliases must also occur verbatim in the quote. Entity type is an inferred category chosen only from the schema enum; it is not a quoted source fact.",
     "temporalMarker must be null or an exact phrase such as Day 8, Chapter 12, version 3, or 2026-07-20 that occurs in the claim quote.",
@@ -595,8 +601,11 @@ function parseClaim(value: unknown): ModelClaim[] {
     : null;
   const polarity = value.polarity === "positive" || value.polarity === "negative" ? value.polarity : null;
   const confidence = value.confidence === "medium" || value.confidence === "high" ? value.confidence : null;
+  const frameArity = value.frameArity === "transitive" || value.frameArity === "intransitive"
+    ? value.frameArity
+    : null;
   if (
-    !claimKind || !polarity || !confidence
+    !claimKind || !polarity || !confidence || !frameArity
     || !nonEmptyString(value.parentEvidenceId, 240)
     || !nonEmptyString(value.quote, 4_000)
     || !nonEmptyString(value.subject, 240)
@@ -612,6 +621,7 @@ function parseClaim(value: unknown): ModelClaim[] {
     subject: value.subject,
     predicate: value.predicate,
     object: value.object,
+    frameArity,
     polarity,
     referents: value.referents,
     temporalMarker: value.temporalMarker,
@@ -671,28 +681,18 @@ function exactSubstringStart(parent: string, candidate: string): number {
   return candidate.length ? parent.indexOf(candidate) : -1;
 }
 
-function frameCopiedInOrder(quote: string, parts: string[]): boolean {
-  if (parts.length < 2 || parts.some((part) => !part.trim())) return false;
-  let cursor = 0;
-  for (const part of parts) {
-    const relative = quote.slice(cursor).indexOf(part);
-    if (relative < 0) return false;
-    cursor += relative + part.length;
-  }
-  return true;
-}
-
 /** Conservatively rejects polarity reversal and explicit hypotheticals. This
  * is a safety gate, not a claim that arbitrary natural-language entailment is
  * solved; hard sentences remain context-only for later review. */
 function polarityEntailedByFrame(
-  quote: string,
-  parts: string[],
+  frame: ModelClaim,
   polarity: "positive" | "negative",
 ): boolean {
-  const first = quote.indexOf(parts[0]);
-  const lastPart = parts.at(-1) ?? "";
-  const last = quote.lastIndexOf(lastPart) + lastPart.length;
+  if (!exactClaimFramePolarityMatches(frame, polarity)) return false;
+  const quote = frame.quote;
+  const first = quote.indexOf(frame.subject);
+  const lastPart = frame.object || frame.predicate;
+  const last = quote.indexOf(lastPart, first + frame.subject.length) + lastPart.length;
   if (first < 0 || last <= first) return false;
   const before = quote.slice(0, first);
   const after = quote.slice(last);
@@ -701,9 +701,7 @@ function polarityEntailedByFrame(
   const sentenceEnd = relativeSentenceEnd < 0 ? quote.length : last + relativeSentenceEnd + 1;
   const sentence = quote.slice(sentenceStart, sentenceEnd).toLowerCase();
   if (/\b(?:may|might|perhaps|possibly|hypothetically|could potentially|is proposed to|is planned to)\b/.test(sentence)) return false;
-  const withoutNotOnly = sentence.replace(/\bnot only\b/g, "");
-  const negated = /\b(?:no|not|never|neither|nor|cannot|can't|doesn't|does not|didn't|did not|isn't|is not|wasn't|was not|without|lacks?|lacking|absent|missing|fails? to|failed to)\b/.test(withoutNotOnly);
-  return polarity === "negative" ? negated : !negated;
+  return true;
 }
 
 function parseTemporalMarker(value: string | null): { axis: string; order: number } | null {

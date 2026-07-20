@@ -33,14 +33,39 @@ it accepts only its exact server-owned receipt and rejects every extra field.
 The `/mcp` route accepts at most 32 KiB of JSON, including protocol and schema
 overhead. Its v3.2 reviewed-sample calls remain pinned to `vcs-demo-r1`.
 
-`continuity_compile_material` accepts at most eight named text documents, 64
-claim proposals, and 64 entity-mention proposals. The advertised per-document
+`continuity_compile_material` accepts at most eight named text documents and 64
+total claim, entity-mention, and relation proposals. The advertised per-document
 string limit is 20,000 characters, but the 32 KiB request ceiling is the
 effective aggregate transport limit. Exact quotes are verified before claims
 or entity candidates are admitted. An unlocatable or repeated quote without an
 occurrence number is rejected; instruction-like material remains untrusted
 data and cannot establish a claim. The packet closes only submitted-membership
 and proposal-verification coverage, never whole-project truth.
+
+Atomic claim frames are exact-span data rather than model paraphrases. Subject,
+predicate, and each non-empty object must occur byte-for-byte in that order in
+the accepted quote. The object may be exactly empty only with an explicit
+`intransitive` frame whose copied predicate is one token at the end of the
+quoted clause. Whitespace-only objects, punctuation placeholders, and discarded expressed
+objects are rejected. Negative polarity requires direct
+negation in the quote. A caller-proposed entity ID is admitted only if the same
+identifier occurs literally in its entity quote; otherwise the compiler emits
+a deterministic source-scoped candidate instead of inventing an identity.
+
+An optional relation proposal refers only to original claim-array indices; it
+cannot submit evidence IDs or canonical claim keys. The supporting claim must
+be an accepted positive causal, normative, or historical span, the exact cue
+must occur inside it, and both accepted endpoint spans must be nested inside
+that same source span. Direction is fixed as prerequisite→dependent,
+trigger→effect, or earlier→later. Negative relation statements, self-edges,
+unanchored endpoints, repeated or invented cues, and compound `or`/`unless`
+logic are rejected. Admitted relations remain source assertions and cannot
+serve as a complete reachability certificate.
+
+Optional temporal ordinals must include a unique exact marker such as `Day 8`
+whose server-parsed axis and integer agree with the submitted values. Uploaded
+dates, SemVer, ranges, and domain-specific orderings require a trusted adapter;
+the compiler does not turn unverified numbers into temporal graph edges.
 
 `continuity_inspect_public_repository` permits one canonical public GitHub
 repository and optional ref. The handler resolves a full commit, examines no
@@ -53,9 +78,10 @@ causal work.
 The question graph is in-memory and question-scoped. Build ceilings are 512
 input evidence records, 256 nodes, and 512 edges; traversal defaults to 72
 nodes, 144 edges, and depth 3 and can never exceed depth 6. Short bounded
-identity lookups bypass it. Semantic precondition/consequence links are
-admitted only when an upstream compiler or reviewed adapter binds them to an
-exact evidence ID.
+identity lookups bypass it. Trusted adapters may bind semantic links to exact
+claim keys. The untrusted upload path instead uses exact evidence IDs for its
+support span and both endpoints, so edge provenance cannot be confused with an
+endpoint assertion.
 
 ## Upload envelope
 

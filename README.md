@@ -33,8 +33,9 @@ material actually establishes. It keeps five jobs separate:
 1. It receives a small, question-relevant packet of text or inspects a bounded
    public GitHub snapshot.
 2. It verifies that proposed claims and character/entity mentions are exact
-   spans in that material. A model cannot create a citation merely by naming
-   one.
+   spans in that material. Optional causal links must cite one supporting span,
+   an exact relationship cue, and two already accepted endpoint spans. A model
+   cannot create a citation or graph edge merely by naming one.
 3. It preserves source identity, time, authority, disagreement, and ambiguity
    instead of flattening every sentence into one supposedly canonical answer.
 4. It uses the smallest safe route. A simple identity lookup skips graph work;
@@ -79,6 +80,8 @@ direct-worker and local hosts.
      blocking dependency and evidence.”
    - “Who is Grandma? Keep separate people separate and cite each mention.”
    - “What must happen before this event, and which prerequisite is missing?”
+   - “Map only the prerequisites directly stated in these files. Show the
+     relationship cue and leave ‘or’ or ‘unless’ conditions unresolved.”
    - “Do these two files disagree, or do they describe different points in
      time?”
    - “If I add this scene, what established facts, later payoffs, or production
@@ -92,7 +95,20 @@ The MCP advertises five read-only tools:
   change; this hosted adapter supplies its fixed sample ID and revision. Older
   clients may still send those two scope fields explicitly.
 - `continuity_compile_material` verifies exact claims and entity mentions from
-  text ChatGPT passes from an attachment, paste, or repository-aware host.
+  text ChatGPT passes from an attachment, paste, or repository-aware host. Its
+  claim frame is deliberately literal: subject, predicate, and any non-empty
+  object are copied exactly from the cited quote in order. An intransitive
+  statement such as “Test T9 passed” uses `frameArity: intransitive`, an empty
+  object, and one copied predicate token at the end of the quoted clause.
+  Expressed objects cannot be discarded. The source's packet-relative
+  `reference`, `proposal`, or `production_record` label remains visible in the
+  receipt and graph; it never becomes project canon. An explicit entity ID is
+  accepted only when that exact ID is visible in the quote. Optional
+  `relations` connect original
+  claim indices only when one accepted positive causal, normative, or
+  historical claim contains the exact cue and both endpoint spans. These edges
+  are source assertions for navigation, not automatic proof that an event is
+  reachable.
 - `continuity_inspect_public_repository` pins a public GitHub repository to one
   commit and returns a small safe set of question-relevant excerpts. ChatGPT
   can then pass those excerpts into `continuity_compile_material` for exact
@@ -145,9 +161,12 @@ at most eight provider calls, six files read, 20 KiB of returned excerpts, a
 20-second deadline, no automatic retry, a durable service-global daily
 reservation before any GitHub call, and no corpus-wide absence claim. The
 upload compiler accepts source assertions, not project truth. Its graph is
-question-scoped and can traverse only verified claims and verified upstream
-semantic links; it is not yet a durable whole-corpus knowledge graph or an
-automatic natural-language causality theorem prover.
+question-scoped and can traverse verified claims plus simple, exact-evidence-
+bound precondition, consequence, and before edges. Negative relationship
+claims and compound `or`/`unless` logic remain visible prose rather than being
+flattened into misleading edges. This is not yet a durable whole-corpus
+knowledge graph, alternative-path solver, or automatic natural-language
+causality theorem prover.
 
 ### v3.2 to v3.3 compatibility
 
@@ -215,8 +234,9 @@ trusted adapter supplies server-owned dependency obligations, generated output
 cannot omit them, and a required open or blocked obligation prevents support.
 Arbitrary uploaded material does not acquire a complete causal graph
 automatically. The MCP may build one bounded question-scoped graph from
-verified atomic spans; explicit precondition/consequence edges still require a
-verified compiler or reviewed adapter record.
+verified atomic spans. A simple precondition, consequence, or before edge must
+also survive the exact relation boundary; deterministic reachability still
+requires a trusted complete transition registry or reviewed adapter.
 
 ## Current capability boundary
 
@@ -396,7 +416,7 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 
 - `npm run dev`: start local development
 - `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
+- `npm test`: build the application and run the rendered and continuity suites
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
 ## Learn More

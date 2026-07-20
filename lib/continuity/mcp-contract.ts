@@ -101,7 +101,7 @@ export const continuityMcpTools = {
     },
   },
   continuity_compile_material: {
-    description: "Use after the user uploads or pastes material. Verify ChatGPT-proposed exact spans and entity mentions, preserve ambiguity and source disagreement, and return a bounded question-scoped context receipt. The tool is stateless, keyless, and never promotes uploaded text to project canon.",
+    description: "Use after the user uploads or pastes material. Verify ChatGPT-proposed exact surface spans, entity mentions, and optional evidence-bound relations; preserve ambiguity and source disagreement; and return a bounded question-scoped context receipt. Claim subject, predicate, and non-empty object must be copied byte-for-byte from the quote in that order; an empty object requires frameArity intransitive and one terminal predicate token. A relation requires an exact cue and two accepted endpoint spans inside one accepted supporting claim. The tool is stateless, keyless, and never promotes uploaded text to project canon.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -134,16 +134,37 @@ export const continuityMcpTools = {
               documentName: { type: "string", minLength: 1, maxLength: 240 },
               quote: { type: "string", minLength: 1, maxLength: 8_192 },
               occurrence: { type: "integer", minimum: 1 },
-              claimKind: { type: "string", minLength: 1, maxLength: 64, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" },
-              subject: { type: "string", minLength: 1, maxLength: 512 },
-              predicate: { type: "string", minLength: 1, maxLength: 512 },
-              object: { type: "string", minLength: 1, maxLength: 512 },
-              polarity: { type: "string", enum: ["positive", "negative"] },
+              claimKind: {
+                type: "string", minLength: 1, maxLength: 64, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+                description: "A source-assertion category such as observed, normative, historical, or causal. It does not promote the claim to project truth.",
+              },
+              subject: {
+                type: "string", minLength: 1, maxLength: 512,
+                description: "Copy this byte-for-byte from the exact quote.",
+              },
+              predicate: {
+                type: "string", minLength: 1, maxLength: 512,
+                description: "Copy this byte-for-byte from the exact quote after the subject; do not normalize or paraphrase it.",
+              },
+              object: {
+                type: "string", minLength: 0, maxLength: 512,
+                description: "Copy a non-empty value byte-for-byte from the quote after the predicate. Use exactly the empty string only with frameArity intransitive when the predicate finishes the quoted clause.",
+              },
+              frameArity: {
+                type: "string", enum: ["transitive", "intransitive"],
+                description: "Optional for backward compatibility with non-empty transitive frames. Set to intransitive only with object \"\" and one copied terminal predicate token, for example subject 'Test T9', predicate 'passed' from 'Test T9 passed.' Never discard an expressed object.",
+              },
+              polarity: {
+                type: "string", enum: ["positive", "negative"],
+                description: "Use negative only when the exact quote directly negates this atomic claim; otherwise use positive.",
+              },
               temporal: {
                 type: ["object", "null"],
                 additionalProperties: false,
-                required: ["axis", "from"],
+                required: ["marker", "axis", "from"],
+                description: "Optional verified simple ordinal. The exact marker must occur uniquely in the quote and normalize to the supplied axis and number. Omit this field for dates, SemVer, ranges, or domain orderings that require a trusted adapter.",
                 properties: {
+                  marker: { type: "string", minLength: 1, maxLength: 120 },
                   axis: { type: "string", minLength: 1, maxLength: 64, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" },
                   from: { type: "integer", minimum: 0, maximum: 1_000_000_000 },
                   to: { type: "integer", minimum: 0, maximum: 1_000_000_000 },
@@ -166,7 +187,37 @@ export const continuityMcpTools = {
               mention: { type: "string", minLength: 1, maxLength: 512 },
               mentionOccurrence: { type: "integer", minimum: 1 },
               entityType: { type: "string", minLength: 1, maxLength: 512 },
-              explicitId: { type: "string", minLength: 1, maxLength: 512 },
+              explicitId: {
+                type: "string", minLength: 1, maxLength: 512,
+                description: "Optional. Supply only when this exact identifier occurs byte-for-byte inside the entity quote; otherwise omit it.",
+              },
+            },
+          },
+        },
+        relations: {
+          type: "array",
+          maxItems: 64,
+          description: "Optional exact-evidence-bound causal or temporal links. Indices refer to the original claims array. These source-assertion edges support navigation, not deterministic reachability proof.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["relation", "evidenceClaimIndex", "fromClaimIndex", "toClaimIndex", "cue"],
+            properties: {
+              relation: {
+                type: "string", enum: ["precondition", "consequence", "temporal_before"],
+                description: "Direction is fixed: prerequisite to dependent, trigger to effect, or earlier to later.",
+              },
+              evidenceClaimIndex: {
+                type: "integer", minimum: 0,
+                description: "Index of an accepted positive causal, normative, or historical claim whose exact span states the relation.",
+              },
+              fromClaimIndex: { type: "integer", minimum: 0, description: "Index of the accepted source endpoint claim." },
+              toClaimIndex: { type: "integer", minimum: 0, description: "Index of the accepted destination endpoint claim." },
+              cue: {
+                type: "string", minLength: 1, maxLength: 512,
+                description: "Copy the relationship cue byte-for-byte from the supporting claim quote, for example 'only after', 'causes', or 'before'.",
+              },
+              cueOccurrence: { type: "integer", minimum: 1 },
             },
           },
         },

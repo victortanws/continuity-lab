@@ -7,6 +7,20 @@ import {
   type RepositoryReference,
   type RepositoryTreeEntry,
 } from "./repositories/github";
+import {
+  exactClaimFrameAppearsInOrder,
+  exactClaimFramePolarityMatches,
+  exactClaimFrameSpan,
+  exactTemporalMarkerSharesClause,
+  type ExactFrameArity,
+} from "./exact-frame";
+import {
+  exactRelationCueDirection,
+  exactRelationEndpointsMatch,
+  exactRelationClaimKindIsAdmissible,
+  exactRelationHasUnsupportedLogic,
+} from "./exact-relation";
+import { detectEvidenceFlags } from "./evidence-flags";
 
 /**
  * A keyless, stateless boundary for turning caller-supplied text into a small
@@ -65,11 +79,14 @@ export type ProposedExactSpanClaim = {
   subject: string;
   predicate: string;
   object: string;
+  /** Existing non-empty frames default to transitive. An empty object requires
+   * an explicit intransitive marker and one terminal predicate token. */
+  frameArity?: ExactFrameArity;
   polarity: ClaimPolarity;
-  /** Optional caller-proposed ordinal frame, verified structurally and kept
-   * source-scoped. It prevents a legitimate state change from becoming a
-   * false same-time disagreement. */
-  temporal?: { axis: string; from: number; to?: number } | null;
+  /** Optional source-scoped ordinal frame. The marker must be an exact,
+   * uniquely located simple ordinal such as Day 8 and must normalize to the
+   * supplied axis and number. */
+  temporal?: { marker: string; axis: string; from: number; to?: number } | null;
 };
 
 export type ProposedEntityMention = {
@@ -85,10 +102,23 @@ export type ProposedEntityMention = {
   explicitId?: string;
 };
 
+export type ProposedExactRelation = {
+  /** Direction is fixed: prerequisite→dependent, trigger→effect, or earlier→later. */
+  relation: "precondition" | "consequence" | "temporal_before";
+  /** Indices refer to the original claims array, before any rejection. */
+  evidenceClaimIndex: number;
+  fromClaimIndex: number;
+  toClaimIndex: number;
+  /** Exact relationship cue inside the supporting claim quote. */
+  cue: string;
+  cueOccurrence?: number;
+};
+
 export type McpContextInput = {
   documents: UploadedTextDocument[];
   claims?: ProposedExactSpanClaim[];
   entityMentions?: ProposedEntityMention[];
+  relations?: ProposedExactRelation[];
 };
 
 type PacketAuthority = {
@@ -137,6 +167,19 @@ export type McpEntityCandidate = {
   trust: "untrusted_data";
 };
 
+export type McpContextRelation = {
+  id: string;
+  relation: ProposedExactRelation["relation"];
+  evidenceClaimId: string;
+  fromClaimId: string;
+  toClaimId: string;
+  cue: string;
+  cueStart: number;
+  cueEnd: number;
+  truthStatus: "source_assertion";
+  materialized: true;
+};
+
 export type McpContextPacket = {
   version: typeof MCP_CONTEXT_VERSION;
   stateless: true;
@@ -153,6 +196,7 @@ export type McpContextPacket = {
   }>;
   claims: McpContextClaim[];
   entityCandidates: McpEntityCandidate[];
+  relations: McpContextRelation[];
   entityCandidateGroups: Array<{
     id: string;
     normalizedMention: string;
@@ -182,7 +226,7 @@ export type McpContextPacket = {
     closure: "closed" | "partial";
   };
   rejectedProposals: Array<{
-    proposalType: "claim" | "entity";
+    proposalType: "claim" | "entity" | "relation";
     proposalIndex: number;
     code: string;
   }>;
@@ -219,7 +263,8 @@ function byteLength(value: string): number {
 }
 
 function sourceInstructionRisk(value: string): boolean {
-  return SOURCE_INSTRUCTION_PATTERNS.some((pattern) => pattern.test(value));
+  return SOURCE_INSTRUCTION_PATTERNS.some((pattern) => pattern.test(value))
+    || detectEvidenceFlags(value).includes("possible_prompt_injection");
 }
 
 function normalized(value: string): string {
@@ -280,6 +325,16 @@ function occurrences(text: string, exact: string): number[] {
   return result;
 }
 
+function containsExactIdentifier(text: string, identifier: string): boolean {
+  const identifierCharacter = /[\p{L}\p{N}_-]/u;
+  return occurrences(text, identifier).some((start) => {
+    const before = start > 0 ? text[start - 1] : "";
+    const after = start + identifier.length < text.length ? text[start + identifier.length] : "";
+    return (!before || !identifierCharacter.test(before))
+      && (!after || !identifierCharacter.test(after));
+  });
+}
+
 function exactOccurrence(
   text: string,
   exact: string,
@@ -316,25 +371,31 @@ function validField(value: unknown): value is string {
     && byteLength(value) <= MCP_CONTEXT_LIMITS.maxFrameFieldBytes;
 }
 
-function frameAppearsInOrder(quote: string, subject: string, predicate: string, object: string): boolean {
-  const subjectAt = quote.indexOf(subject);
-  const predicateAt = subjectAt < 0 ? -1 : quote.indexOf(predicate, subjectAt + subject.length);
-  const objectAt = predicateAt < 0 ? -1 : quote.indexOf(object, predicateAt + predicate.length);
-  return subjectAt >= 0 && predicateAt >= 0 && objectAt >= 0;
+function validObjectField(value: unknown): value is string {
+  return value === "" || validField(value);
 }
 
-function polarityMatchesQuote(quote: string, polarity: ClaimPolarity): boolean {
-  const normalizedQuote = quote.toLocaleLowerCase("en-US").replace(/\bnot only\b/g, "");
-  const negative = /\b(?:no|not|never|neither|nor|cannot|can't|doesn't|does not|didn't|did not|isn't|is not|wasn't|was not|without|lacks?|lacking|absent|missing|fails? to|failed to)\b/.test(normalizedQuote);
-  return polarity === "negative" ? negative : !negative;
-}
-
-function validTemporalFrame(value: ProposedExactSpanClaim["temporal"]): value is NonNullable<ProposedExactSpanClaim["temporal"]> {
+function validTemporalFrame(
+  value: ProposedExactSpanClaim["temporal"],
+  quote: string,
+  frame: ProposedExactSpanClaim,
+): value is NonNullable<ProposedExactSpanClaim["temporal"]> {
   if (!value || typeof value !== "object") return false;
   if (typeof value.axis !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value.axis)) return false;
+  const markerSpan = validField(value.marker) && byteLength(value.marker) <= 120
+    ? exactOccurrence(quote, value.marker, undefined)
+    : null;
+  const frameSpan = exactClaimFrameSpan(frame);
+  if (!markerSpan || !frameSpan || !exactTemporalMarkerSharesClause(quote, markerSpan, frameSpan)) return false;
   if (!Number.isSafeInteger(value.from) || value.from < 0 || value.from > 1_000_000_000) return false;
   const to = value.to ?? value.from;
-  return Number.isSafeInteger(to) && to >= value.from && to <= 1_000_000_000;
+  if (!Number.isSafeInteger(to) || to !== value.from) return false;
+  const match = value.marker.trim().toLocaleLowerCase("en-US")
+    .match(/^(day|chapter|ch|beat|scene|turn|episode|ep|step|version|v)[\s_:#-]*(\d+)$/);
+  if (!match) return false;
+  const aliases: Record<string, string> = { ch: "chapter", ep: "episode", v: "version" };
+  const markerAxis = aliases[match[1]] ?? match[1];
+  return normalized(value.axis) === markerAxis && Number(match[2]) === value.from;
 }
 
 function proposalQuoteValid(quote: unknown): quote is string {
@@ -351,10 +412,11 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
   }
   const claims = input.claims ?? [];
   const entityMentions = input.entityMentions ?? [];
-  if (!Array.isArray(claims) || !Array.isArray(entityMentions)) {
-    throw new McpContextError("claims and entityMentions must be arrays.", "invalid_input");
+  const relations = input.relations ?? [];
+  if (!Array.isArray(claims) || !Array.isArray(entityMentions) || !Array.isArray(relations)) {
+    throw new McpContextError("claims, entityMentions, and relations must be arrays.", "invalid_input");
   }
-  if (claims.length + entityMentions.length > MCP_CONTEXT_LIMITS.maxProposals) {
+  if (claims.length + entityMentions.length + relations.length > MCP_CONTEXT_LIMITS.maxProposals) {
     throw new McpContextError(`At most ${MCP_CONTEXT_LIMITS.maxProposals} proposals are accepted.`, "proposal_limit");
   }
 
@@ -392,6 +454,7 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
 
   const rejectedProposals: McpContextPacket["rejectedProposals"] = [];
   const acceptedClaims = new Map<string, McpContextClaim>();
+  const acceptedClaimByProposalIndex = new Map<number, McpContextClaim>();
   claims.forEach((proposal, proposalIndex) => {
     const source = proposal && typeof proposal === "object" ? sourceByName.get(proposal.documentName) : undefined;
     if (!source) {
@@ -413,22 +476,35 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
     }
     if (
       !validField(proposal.claimKind) || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(proposal.claimKind)
-      || !validField(proposal.subject) || !validField(proposal.predicate) || !validField(proposal.object)
+      || !validField(proposal.subject) || !validField(proposal.predicate) || !validObjectField(proposal.object)
+      || (proposal.frameArity !== undefined && !["transitive", "intransitive"].includes(proposal.frameArity))
       || !["positive", "negative"].includes(proposal.polarity)
-      || !frameAppearsInOrder(proposal.quote, proposal.subject, proposal.predicate, proposal.object)
-      || !polarityMatchesQuote(proposal.quote, proposal.polarity)
-      || (proposal.temporal !== undefined && proposal.temporal !== null && !validTemporalFrame(proposal.temporal))
+      || !exactClaimFrameAppearsInOrder({
+        quote: proposal.quote,
+        subject: proposal.subject,
+        predicate: proposal.predicate,
+        object: proposal.object,
+        frameArity: proposal.frameArity,
+      })
+      || !exactClaimFramePolarityMatches({
+        quote: proposal.quote,
+        subject: proposal.subject,
+        predicate: proposal.predicate,
+        object: proposal.object,
+        frameArity: proposal.frameArity,
+      }, proposal.polarity)
+      || (proposal.temporal !== undefined && proposal.temporal !== null && !validTemporalFrame(proposal.temporal, proposal.quote, proposal))
     ) {
       rejectedProposals.push({ proposalType: "claim", proposalIndex, code: "invalid_semantic_frame" });
       return;
     }
     const claimKey = [proposal.claimKind, proposal.subject, proposal.predicate, proposal.object]
       .map(normalized).join(":");
-    const temporal = proposal.temporal && validTemporalFrame(proposal.temporal)
+    const temporal = proposal.temporal && validTemporalFrame(proposal.temporal, proposal.quote, proposal)
       ? { axis: normalized(proposal.temporal.axis), from: proposal.temporal.from, to: proposal.temporal.to ?? proposal.temporal.from }
       : null;
     const id = stableId("clm", `${source.id}\u0000${span.start}\u0000${span.end}\u0000${claimKey}\u0000${proposal.polarity}\u0000${JSON.stringify(temporal)}`);
-    acceptedClaims.set(id, {
+    const acceptedClaim: McpContextClaim = {
       id,
       documentId: source.id,
       assertionOwnerId: source.id,
@@ -446,6 +522,96 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
       authority: source.authority,
       truthStatus: "source_assertion",
       trust: "untrusted_data",
+    };
+    acceptedClaims.set(id, acceptedClaim);
+    acceptedClaimByProposalIndex.set(proposalIndex, acceptedClaim);
+  });
+
+  const acceptedRelations = new Map<string, McpContextRelation>();
+  relations.forEach((proposal, proposalIndex) => {
+    if (!proposal || typeof proposal !== "object"
+      || !["precondition", "consequence", "temporal_before"].includes(proposal.relation)
+      || !Number.isSafeInteger(proposal.evidenceClaimIndex)
+      || !Number.isSafeInteger(proposal.fromClaimIndex)
+      || !Number.isSafeInteger(proposal.toClaimIndex)) {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "invalid_relation" });
+      return;
+    }
+    const evidenceClaim = acceptedClaimByProposalIndex.get(proposal.evidenceClaimIndex);
+    const fromClaim = acceptedClaimByProposalIndex.get(proposal.fromClaimIndex);
+    const toClaim = acceptedClaimByProposalIndex.get(proposal.toClaimIndex);
+    if (!evidenceClaim) {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "relation_claim_rejected" });
+      return;
+    }
+    if (!fromClaim || !toClaim) {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "relation_endpoint_rejected" });
+      return;
+    }
+    if (fromClaim.id === toClaim.id) {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "relation_self_edge" });
+      return;
+    }
+    if (evidenceClaim.polarity !== "positive") {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "negative_relation_not_materialized" });
+      return;
+    }
+    if (!exactRelationClaimKindIsAdmissible(evidenceClaim.claimKind)) {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "relation_claim_kind_not_admissible" });
+      return;
+    }
+    if (exactRelationHasUnsupportedLogic(evidenceClaim.quote)) {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "unsupported_relation_logic" });
+      return;
+    }
+    const localCueSpan = validField(proposal.cue)
+      ? exactOccurrence(evidenceClaim.quote, proposal.cue, proposal.cueOccurrence)
+      : null;
+    if (!localCueSpan) {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "relation_cue_not_unique_or_exact" });
+      return;
+    }
+    const endpointsAnchored = fromClaim.documentId === evidenceClaim.documentId
+      && toClaim.documentId === evidenceClaim.documentId
+      && fromClaim.start >= evidenceClaim.start && fromClaim.end <= evidenceClaim.end
+      && toClaim.start >= evidenceClaim.start && toClaim.end <= evidenceClaim.end;
+    if (!endpointsAnchored) {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "relation_endpoint_not_anchored" });
+      return;
+    }
+    const cueSpan = {
+      start: evidenceClaim.start + localCueSpan.start,
+      end: evidenceClaim.start + localCueSpan.end,
+    };
+    const cueDirection = exactRelationCueDirection(proposal.cue, proposal.relation);
+    if (!cueDirection) {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "relation_cue_not_admissible" });
+      return;
+    }
+    if (!exactRelationEndpointsMatch(cueDirection, cueSpan, fromClaim, toClaim, {
+      start: evidenceClaim.start,
+      text: evidenceClaim.quote,
+    }, [...acceptedClaimByProposalIndex.values()]
+      .filter((claim) => claim.documentId === evidenceClaim.documentId
+        && claim.id !== evidenceClaim.id && claim.id !== fromClaim.id && claim.id !== toClaim.id)
+      .map((claim) => ({ start: claim.start, end: claim.end })))) {
+      rejectedProposals.push({ proposalType: "relation", proposalIndex, code: "relation_direction_not_anchored" });
+      return;
+    }
+    const id = stableId("rel", [
+      evidenceClaim.id, fromClaim.id, toClaim.id, proposal.relation, proposal.cue, cueSpan.start,
+    ].join("\u0000"));
+    acceptedRelations.set(id, {
+      id,
+      relation: proposal.relation,
+      evidenceClaimId: evidenceClaim.id,
+      fromClaimId: fromClaim.id,
+      toClaimId: toClaim.id,
+      cue: proposal.cue,
+      cueStart: cueSpan.start,
+      cueEnd: cueSpan.end,
+      truthStatus: "source_assertion",
+      materialized: true,
     });
   });
 
@@ -478,7 +644,7 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
       rejectedProposals.push({ proposalType: "entity", proposalIndex, code: "invalid_entity_type" });
       return;
     }
-    if (proposal.explicitId !== undefined && (!validField(proposal.explicitId) || !proposal.quote.includes(proposal.explicitId))) {
+    if (proposal.explicitId !== undefined && (!validField(proposal.explicitId) || !containsExactIdentifier(proposal.quote, proposal.explicitId))) {
       rejectedProposals.push({ proposalType: "entity", proposalIndex, code: "unanchored_explicit_id" });
       return;
     }
@@ -511,6 +677,7 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
 
   const compiledClaims = [...acceptedClaims.values()].sort((a, b) => a.id.localeCompare(b.id));
   const compiledEntities = [...acceptedEntities.values()].sort((a, b) => a.id.localeCompare(b.id));
+  const compiledRelations = [...acceptedRelations.values()].sort((a, b) => a.id.localeCompare(b.id));
 
   const conflicts: McpContextPacket["conflicts"] = [];
   const byKey = new Map<string, McpContextClaim[]>();
@@ -554,8 +721,8 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
     };
   }).sort((a, b) => a.id.localeCompare(b.id));
 
-  const submittedProposalCount = claims.length + entityMentions.length;
-  const acceptedProposalCount = compiledClaims.length + compiledEntities.length;
+  const submittedProposalCount = claims.length + entityMentions.length + relations.length;
+  const acceptedProposalCount = submittedProposalCount - rejectedProposals.length;
   const documents = [...sourceByName.values()].map((source) => ({
     id: source.id,
     name: source.name,
@@ -573,6 +740,7 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
   ];
   if (rejectedProposals.length) diagnostics.push(`${rejectedProposals.length} proposal(s) were rejected by exact-span or safety validation.`);
   if (conflicts.length) diagnostics.push(`${conflicts.length} same-key opposite-polarity source disagreement(s) were preserved without resolving project truth.`);
+  if (compiledRelations.length) diagnostics.push(`${compiledRelations.length} exact-span relation(s) were admitted as source assertions, not reachability proofs.`);
 
   return {
     version: MCP_CONTEXT_VERSION,
@@ -581,6 +749,7 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
     documents,
     claims: compiledClaims,
     entityCandidates: compiledEntities,
+    relations: compiledRelations,
     entityCandidateGroups,
     conflicts,
     membershipCoverage: {

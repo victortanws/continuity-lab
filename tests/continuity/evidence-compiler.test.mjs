@@ -58,6 +58,7 @@ function claim(overrides = {}) {
     subject: "Grandma",
     predicate: "opened",
     object: "bakery",
+    frameArity: "transitive",
     polarity: "positive",
     referents: ["Grandma"],
     temporalMarker: "Day 8",
@@ -118,6 +119,41 @@ test("a negated sentence cannot be compiled with reversed positive polarity", as
   assert.equal(result.evidence.length, 1);
   assert.ok(result.evidence[0].flags.includes("compiled_context_only"));
   assert.match(result.diagnostics.join("\n"), /polarity was not entailed/i);
+});
+
+test("objectless exact frames require an intransitive terminal predicate and cannot hide an expressed object", async () => {
+  const source = parent({
+    text: "Migration M7 was not completed. Test suite T9 passed. Ari opened the hatch.",
+    claimKinds: ["observed", "tested"],
+  });
+  const compiler = compilerFor({
+    claims: [
+      claim({
+        quote: "Migration M7 was not completed.", claimKind: "observed",
+        subject: "Migration M7", predicate: "completed", object: "",
+        frameArity: "intransitive", polarity: "negative", referents: ["Migration M7"], temporalMarker: null,
+      }),
+      claim({
+        quote: "Test suite T9 passed.", claimKind: "tested",
+        subject: "Test suite T9", predicate: "passed", object: "",
+        frameArity: "intransitive", referents: ["Test suite T9"], temporalMarker: null,
+      }),
+      claim({
+        quote: "Ari opened the hatch.", claimKind: "observed",
+        subject: "Ari", predicate: "opened", object: "",
+        frameArity: "intransitive", referents: ["Ari"], temporalMarker: null,
+      }),
+    ],
+    entities: [],
+  });
+
+  const result = await compiler.compile(REQUEST, [source], DEFAULT_AUTHORITY_POLICY);
+  const atomic = result.evidence.filter((item) => item.flags.includes("compiled_atomic_span"));
+  assert.equal(atomic.length, 2);
+  assert.ok(atomic.some((item) => item.claimKey === "observed:migration-m7:completed:_"));
+  assert.ok(atomic.some((item) => item.claimKey === "tested:test-suite-t9:passed:_"));
+  assert.equal(atomic.some((item) => item.text.includes("hatch")), false);
+  assert.match(result.diagnostics.join("\n"), /semantic frame was not copied/i);
 });
 
 test("flagged source instructions are quarantined before any compiler provider call", async () => {
@@ -315,18 +351,18 @@ test("the same compiler produces typed exact-span evidence for non-story softwar
   let call;
   const compiler = compilerFor({
     claims: [claim({
-      quote: "retry_policy:\n  max_attempts: 3",
+      quote: "max_attempts: 3",
       claimKind: "configured",
-      subject: "retry_policy",
-      predicate: "max_attempts",
+      subject: "max_attempts",
+      predicate: ":",
       object: "3",
-      referents: ["retry_policy"],
+      referents: ["max_attempts"],
       temporalMarker: null,
     })],
     entities: [entity({
-      quote: "retry_policy:\n  max_attempts: 3",
-      mention: "retry_policy",
-      name: "retry_policy",
+      quote: "max_attempts: 3",
+      mention: "max_attempts",
+      name: "max_attempts",
       type: "configuration object",
     })],
   }, (url, init) => { call = { url, init }; });
@@ -335,13 +371,13 @@ test("the same compiler produces typed exact-span evidence for non-story softwar
   const compiled = result.evidence.find((item) => item.claimKind === "configured");
 
   assert.ok(compiled);
-  assert.equal(compiled.text, "retry_policy:\n  max_attempts: 3");
-  assert.equal(compiled.claimKey, "configured:retry_policy:max_attempts:3");
+  assert.equal(compiled.text, "max_attempts: 3");
+  assert.equal(compiled.claimKey, "configured:max_attempts::3");
   assert.equal(compiled.authority, "production");
   assert.equal(compiled.role, "configuration");
   assert.equal(compiled.parentEvidenceId, raw.id);
-  assert.equal(compiled.quoteStart, 0);
-  assert.equal(compiled.quoteEnd, compiled.text.length);
+  assert.equal(compiled.quoteStart, raw.text.indexOf("max_attempts: 3"));
+  assert.equal(compiled.quoteEnd, raw.text.indexOf("max_attempts: 3") + compiled.text.length);
   assert.equal(compiled.entityCandidates.length, 1);
   assert.match(call.url, /\/responses$/);
   const body = JSON.parse(call.init.body);

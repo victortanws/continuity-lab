@@ -36,12 +36,17 @@ function evidence(overrides) {
     claimKind: overrides.claimKind,
     claimKey: overrides.claimKey,
     polarity: overrides.polarity ?? "positive",
-    assertionScope: "project_truth",
-    assertionOwnerId: overrides.projectId ?? "project",
+    assertionScope: overrides.assertionScope ?? "project_truth",
+    assertionOwnerId: overrides.assertionOwnerId ?? overrides.projectId ?? "project",
+    world: overrides.world,
+    epistemicOwner: overrides.epistemicOwner,
     entityCandidates: overrides.entityCandidates ?? [],
     temporalAxis: overrides.temporalAxis ?? null,
     validFromOrder: overrides.validFromOrder ?? null,
-    flags: ["compiled_atomic_span"],
+    parentEvidenceId: overrides.parentEvidenceId ?? null,
+    quoteStart: overrides.quoteStart ?? null,
+    quoteEnd: overrides.quoteEnd ?? null,
+    flags: overrides.flags ?? ["compiled_atomic_span"],
   };
 }
 
@@ -231,6 +236,45 @@ test("context-only, injection-flagged, and ungrounded semantic records are rejec
   assert.equal(graph.receipt.semanticRecordsRejected, 1);
 });
 
+test("exact-ID semantic edges use their supporting span as provenance and reject negative or missing evidence", () => {
+  const relationText = "Release deploys only after Migration completes.";
+  const migrationText = "Migration completes";
+  const deploymentText = "Release deploys";
+  const items = [
+    evidence({ id: "RULE", projectId: "release", sourceVersionId: "rules@1", text: relationText, claimKind: "normative", claimKey: "rule:release", quoteStart: 0, quoteEnd: relationText.length }),
+    evidence({ id: "MIGRATION", projectId: "release", sourceVersionId: "rules@1", text: migrationText, claimKind: "observed", claimKey: "state:migration:complete", quoteStart: relationText.indexOf(migrationText), quoteEnd: relationText.indexOf(migrationText) + migrationText.length }),
+    evidence({ id: "DEPLOY", projectId: "release", sourceVersionId: "rules@1", text: deploymentText, claimKind: "observed", claimKey: "event:release:deploy", quoteStart: relationText.indexOf(deploymentText), quoteEnd: relationText.indexOf(deploymentText) + deploymentText.length }),
+    evidence({ id: "NEGATED", projectId: "release", text: "Release does not require migration.", claimKind: "normative", claimKey: "rule:no-requirement", polarity: "negative" }),
+  ];
+  const graph = buildQuestionGraph({
+    projectId: "release",
+    projectRevision: "3.3",
+    evidence: items,
+    semanticEdges: [
+      {
+        evidenceId: "RULE", fromEvidenceId: "MIGRATION", toEvidenceId: "DEPLOY",
+        cue: "only after", cueStart: relationText.indexOf("only after"), cueEnd: relationText.indexOf("only after") + "only after".length,
+        relation: "precondition",
+      },
+      {
+        evidenceId: "NEGATED", fromEvidenceId: "MIGRATION", toEvidenceId: "DEPLOY",
+        cue: "not require", cueStart: 13, cueEnd: 24, relation: "precondition",
+      },
+      {
+        evidenceId: "missing", fromEvidenceId: "MIGRATION", toEvidenceId: "DEPLOY",
+        cue: "only after", cueStart: relationText.indexOf("only after"), cueEnd: relationText.indexOf("only after") + "only after".length,
+        relation: "precondition",
+      },
+    ],
+  });
+
+  const edge = graph.edges.find((item) => item.relation === "precondition");
+  assert.ok(edge);
+  assert.deepEqual(edge.evidenceIds, ["RULE"]);
+  assert.equal(graph.receipt.semanticEdgesAdmitted, 1);
+  assert.equal(graph.receipt.semanticEdgesRejected, 2);
+});
+
 test("excluded sources prevent a nominally closed graph from claiming closed corpus coverage", () => {
   const graph = buildQuestionGraph({
     projectId: "records",
@@ -257,4 +301,56 @@ test("graph compilation rejects a node fan-out beyond the hard build ceiling", (
     () => buildQuestionGraph({ projectId: "oversized", projectRevision: "1", evidence: tooMany }),
     /256-node limit/i,
   );
+});
+
+test("the direct graph boundary rejects cross-project and oversized entity evidence", () => {
+  const valid = evidence({
+    id: "IN-SCOPE", projectId: "bounded", text: "Alice arrives.",
+    claimKind: "observed", claimKey: "event:alice:arrives",
+  });
+  const crossProject = evidence({
+    id: "OTHER", projectId: "other", text: "Bob arrives.",
+    claimKind: "observed", claimKey: "event:bob:arrives",
+  });
+  const oversized = evidence({
+    id: "TOO-MANY-ENTITIES", projectId: "bounded", text: "A roster exists.",
+    claimKind: "observed", claimKey: "state:roster:exists",
+    entityCandidates: Array.from({ length: 65 }, (_, index) => ({
+      id: `E-${index}`, name: `Person ${index}`, type: "person", aliases: [],
+      mention: `Person ${index}`, referentKey: `person:${index}`, resolution: "candidate",
+    })),
+  });
+  const graph = buildQuestionGraph({
+    projectId: "bounded", projectRevision: "1", evidence: [valid, crossProject, oversized],
+  });
+
+  assert.equal(graph.receipt.inputEvidence, 3);
+  assert.equal(graph.receipt.admittedAtomicEvidence, 1);
+  assert.equal(graph.receipt.rejectedEvidence, 2);
+  assert.ok(graph.nodes.some((node) => node.key === "event:alice:arrives"));
+  assert.equal(graph.nodes.some((node) => node.key === "event:bob:arrives"), false);
+});
+
+test("exact semantic edges cannot cross assertion owners even inside one source version", () => {
+  const text = "Release deploys only after Migration completes.";
+  const release = "Release deploys";
+  const migration = "Migration completes";
+  const graph = buildQuestionGraph({
+    projectId: "release",
+    projectRevision: "1",
+    evidence: [
+      evidence({ id: "RULE-X", projectId: "release", sourceVersionId: "shared@1", text, claimKind: "normative", claimKey: "rule:release", quoteStart: 0, quoteEnd: text.length, assertionOwnerId: "rules" }),
+      evidence({ id: "MIG-X", projectId: "release", sourceVersionId: "shared@1", text: migration, claimKind: "observed", claimKey: "state:migration", quoteStart: text.indexOf(migration), quoteEnd: text.indexOf(migration) + migration.length, assertionOwnerId: "rules" }),
+      evidence({ id: "DEP-X", projectId: "release", sourceVersionId: "shared@1", text: release, claimKind: "observed", claimKey: "event:deploy", quoteStart: 0, quoteEnd: release.length, assertionOwnerId: "runtime" }),
+    ],
+    semanticEdges: [{
+      evidenceId: "RULE-X", fromEvidenceId: "MIG-X", toEvidenceId: "DEP-X",
+      cue: "only after", cueStart: text.indexOf("only after"), cueEnd: text.indexOf("only after") + 10,
+      relation: "precondition",
+    }],
+  });
+
+  assert.equal(graph.receipt.semanticEdgesAdmitted, 0);
+  assert.equal(graph.receipt.semanticEdgesRejected, 1);
+  assert.equal(graph.edges.some((edge) => edge.relation === "precondition"), false);
 });

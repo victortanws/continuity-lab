@@ -366,9 +366,12 @@ already verified atomic records. A short `who/what/where/when` lookup bypasses
 graph work. Causal, change, sequence, conflict, and multipart questions may
 receive one breadth-first traversal capped at 256 nodes, 512 edges, and depth 6.
 The graph records its coverage and truncation; open corpus coverage can never
-prove that no other path exists. Precondition and consequence links enter only
-when a verified compiler or reviewed adapter supplies them against an admitted
-exact evidence span. Corpus-wide entity resolution, persisted graph slices,
+prove that no other path exists. Trusted adapters can supply claim-key links.
+The stateless upload compiler can additionally admit a simple precondition,
+consequence, or before edge when an accepted positive relation span contains
+the exact cue and two accepted endpoint spans; the graph records that relation
+span, not an endpoint, as provenance. Negative and compound alternative logic
+does not materialize. Corpus-wide entity resolution, persisted graph slices,
 background densification, and explicit entity-pass states are later phases.
 
 ## Model and deterministic responsibilities
@@ -377,7 +380,7 @@ GPT-5.6 Sol proposes exact-span claims, entity candidates, dependency
 descriptions, and provisional repairs. Deterministic code owns hashes, revision
 membership, project isolation, routing, role × authority × lifecycle ×
 assertion-scope permissions, assertion owners, exact locators, evidence budgets,
-ordered frame copying,
+ordered frame copying, conservative objectless-frame validation,
 conservative negation/modality checks, closed-world boundaries, transition
 search, resource conservation, idempotency, required checks, schema validation,
 and displayed answer sealing. The deterministic language gate prevents common
@@ -400,7 +403,17 @@ The transport implements initialization, tool discovery, and five read-only
 calls at `/mcp`. Three remain pinned to `vcs-demo-r1` and invoke only the
 deterministic demonstration engine. `continuity_compile_material` verifies
 caller-proposed exact spans and source-scoped entity mentions in a bounded text
-packet. `continuity_inspect_public_repository` performs one anonymous,
+packet. It requires an explicit intransitive marker plus one terminal copied
+predicate token before accepting an empty object, and rejects a frame that
+hides an expressed object. Packet-relative source authority is preserved into
+the receipt and graph without becoming project truth. The model-backed
+workspace compiler uses the same deterministic frame gate.
+Simple upload relations use original proposal indices rather than caller-owned
+IDs. The compiler resolves those indices to exact server IDs and the graph
+admits an edge only when its support and both endpoints are admitted atomic
+evidence. These source-assertion edges improve causal navigation but do not
+replace the trusted transition registry required for reachability proof.
+`continuity_inspect_public_repository` performs one anonymous,
 commit-pinned, question-scoped GitHub read and returns bounded excerpts; exact
 claims from those excerpts must still pass through the compiler. None invokes
 an OpenAI API model, accepts a GitHub/OpenAI token, writes project state, or

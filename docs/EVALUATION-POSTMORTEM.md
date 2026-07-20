@@ -113,6 +113,45 @@ and integration tests proves implementation behavior but does not prove that
 the treatment improves answers on a population of future projects. These two
 evidence classes must remain separate.
 
+## v3.3 implementation audit before live calls
+
+The first v3.3 candidate was hash-frozen before the external reserve was run,
+but the live calls did not start because no API credential was available. A
+subsequent adversarial implementation audit found boundary defects worth
+fixing before spending the reserve:
+
+1. a proposed frame could borrow negation or a temporal marker from a nearby
+   clause;
+2. an objectless frame could hide an expressed object inside a multiword
+   predicate;
+3. a relation cue could be real yet connect unrelated clauses, or be assigned
+   the wrong direction;
+4. temporal edges could join unrelated source domains that happened to use the
+   same ordinal axis;
+5. an explicit entity ID could be accepted as an incidental substring;
+6. packet-relative proposal and production-record labels were flattened to
+   reference authority at the MCP-to-graph boundary;
+7. the public-repository path used a weaker instruction detector than the main
+   evidence engine; and
+8. the exported graph builder did not independently enforce project and
+   per-record entity/text bounds.
+
+The fixes are deliberately domain-neutral. They use exact clause-local surface
+frames, one-token objectless predicates, exact cue direction and adjacency,
+explicit AND-list handling, same-owner evidence-bound edges, domain-scoped
+temporal ordering, token-bounded source IDs, shared instruction quarantine, and
+hard graph input ceilings. Negative and `or`/`unless` relationship prose is
+retained as evidence but does not become a simple edge. The integrated suite
+now covers VCS, narrative gates, museum custody, software release, prompt
+injection, and direct graph misuse; 296 tests pass.
+
+This is implementation evidence, not a score improvement. The earlier frozen
+candidate hash is now obsolete. Before any API call, the runner must bind the
+new candidate commit and procedure hash while leaving the sealed prompts and
+gold untouched. During preparation, `control/RUBRIC.md` was accidentally opened
+after the earlier freeze; no prompt, gold answer, scorer, or candidate change
+was derived from it. That protocol deviation must remain attached to the run.
+
 ## The recurring substantive error
 
 The most important reasoning failure was treating silence in a partial source

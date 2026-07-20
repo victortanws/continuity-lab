@@ -192,7 +192,7 @@ const CONTEXT_TOOL_OUTPUT_SCHEMA = {
   additionalProperties: false,
   required: [
     "contractVersion", "routerVersion", "sourceKind", "question", "route",
-    "coverage", "claims", "entities", "conflicts", "graph", "rejected", "diagnostics",
+    "coverage", "claims", "entities", "relations", "conflicts", "graph", "rejected", "diagnostics",
   ],
   properties: {
     contractVersion: { type: "string", enum: [CONTINUITY_MCP_CONTRACT_VERSION] },
@@ -225,11 +225,12 @@ const CONTEXT_TOOL_OUTPUT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "documentId", "quote", "locator", "claimKind", "claimKey", "polarity", "temporal", "truthStatus"],
+        required: ["id", "documentId", "quote", "locator", "claimKind", "claimKey", "polarity", "temporal", "authority", "truthStatus"],
         properties: {
           id: { type: "string" }, documentId: { type: "string" }, quote: { type: "string" }, locator: { type: "string" },
           claimKind: { type: "string" }, claimKey: { type: "string" }, polarity: { type: "string", enum: ["positive", "negative"] },
           temporal: { type: ["object", "null"] },
+          authority: { type: "string", enum: ["reference", "proposal", "production_record"] },
           truthStatus: { type: "string", enum: ["source_assertion"] },
         },
       },
@@ -239,10 +240,26 @@ const CONTEXT_TOOL_OUTPUT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "mention", "type", "resolution", "locator"],
+        required: ["id", "mention", "type", "resolution", "locator", "authority"],
         properties: {
           id: { type: "string" }, mention: { type: "string" }, type: { type: "string" },
           resolution: { type: "string", enum: ["resolved", "candidate", "ambiguous"] }, locator: { type: "string" },
+          authority: { type: "string", enum: ["reference", "proposal", "production_record"] },
+        },
+      },
+    },
+    relations: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "relation", "evidenceClaimId", "fromClaimId", "toClaimId", "cue", "cueStart", "cueEnd", "truthStatus", "materialized"],
+        properties: {
+          id: { type: "string" },
+          relation: { type: "string", enum: ["precondition", "consequence", "temporal_before"] },
+          evidenceClaimId: { type: "string" }, fromClaimId: { type: "string" }, toClaimId: { type: "string" }, cue: { type: "string" },
+          cueStart: { type: "integer" }, cueEnd: { type: "integer" },
+          truthStatus: { type: "string", enum: ["source_assertion"] }, materialized: { type: "boolean", enum: [true] },
         },
       },
     },
@@ -261,8 +278,9 @@ const CONTEXT_TOOL_OUTPUT_SCHEMA = {
     graph: {
       type: ["object", "null"],
       additionalProperties: false,
-      required: ["nodes", "edges", "receipt"],
+      required: ["version", "nodes", "edges", "receipt"],
       properties: {
+        version: { type: "string", enum: ["continuity.question-graph.v1"] },
         nodes: { type: "array", items: { type: "object" } },
         edges: { type: "array", items: { type: "object" } },
         receipt: { type: "object" },
@@ -375,7 +393,7 @@ export async function POST(request: Request): Promise<Response> {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "continuity-lab-reviewed-sample", version: "0.2.0" },
-      instructions: "Read-only, stateless continuity tools. Reviewed VCS tools never synchronize a repository or invoke a paid model provider. For uploaded or pasted material, read only question-relevant text, propose exact quotes and entity mentions to continuity_compile_material, then answer from the verified receipt; rejected or absent claims remain unknown. For a public GitHub URL, call continuity_inspect_public_repository first, then pass returned excerpts to continuity_compile_material when exact entity, conflict, or causal structure is needed. Neither path promotes source assertions to project canon. Change analyses are proposals and never become canon.",
+      instructions: "Read-only, stateless continuity tools. Reviewed VCS tools never synchronize a repository or invoke a paid model provider. For uploaded or pasted material, read only question-relevant text, propose exact quotes and entity mentions to continuity_compile_material, then answer from the verified receipt; rejected or absent claims remain unknown. In each claim, copy subject, predicate, and any non-empty object byte-for-byte from the quote in that order. Use frameArity intransitive with object \"\" only for a single copied predicate token that finishes the quoted clause; never discard an expressed object. Mark polarity negative only when the quote directly negates the claim. Omit explicitId unless that exact ID occurs in the entity quote. claimKind classifies a source assertion and never grants authority. For causal structure, optionally propose relations by original claim index: the supporting positive causal, normative, or historical claim must contain the exact cue and both accepted endpoint spans. Direction is prerequisite to dependent, trigger to effect, or earlier to later. Do not materialize negative, or/unless, or alternative-path logic as a simple edge; admitted edges aid navigation and are not reachability proofs. For a public GitHub URL, call continuity_inspect_public_repository first, then pass returned excerpts to continuity_compile_material when exact entity, conflict, or causal structure is needed. Neither path promotes source assertions to project canon. Change analyses are proposals and never become canon.",
     });
   }
 
@@ -561,7 +579,7 @@ function queryForTool(name: ReviewedToolName, input: JsonObject): QueryRequest {
 
 function validateContextToolArguments(name: ContextToolName, input: JsonObject): string | null {
   const allowed = name === "continuity_compile_material"
-    ? new Set(["question", "documents", "claims", "entityMentions"])
+    ? new Set(["question", "documents", "claims", "entityMentions", "relations"])
     : new Set(["repository", "question", "requestedRef"]);
   const unexpected = Object.keys(input).filter((key) => !allowed.has(key));
   if (unexpected.length) return `Unexpected argument${unexpected.length === 1 ? "" : "s"}: ${unexpected.join(", ")}.`;
@@ -590,6 +608,7 @@ function compileMaterialTool(input: JsonObject) {
     documents: input.documents,
     claims: input.claims,
     entityMentions: input.entityMentions,
+    relations: input.relations,
   } as McpContextInput);
   const route = planQuestionGraphUse(question);
   const evidence = packetEvidence(packet);
@@ -599,6 +618,15 @@ function compileMaterialTool(input: JsonObject) {
       projectId: "mcp-upload-packet",
       projectRevision: packet.documents.map((document) => document.contentFingerprint).join(":"),
       evidence,
+      semanticEdges: packet.relations.map((relation) => ({
+        evidenceId: relation.evidenceClaimId,
+        fromEvidenceId: relation.fromClaimId,
+        toEvidenceId: relation.toClaimId,
+        cue: relation.cue,
+        cueStart: relation.cueStart,
+        cueEnd: relation.cueEnd,
+        relation: relation.relation,
+      })),
       coverage: {
         scope: "verified claims in the submitted packet",
         closure: "open",
@@ -644,6 +672,7 @@ function compileMaterialTool(input: JsonObject) {
       claimKey: claim.claimKey,
       polarity: claim.polarity,
       temporal: claim.temporal,
+      authority: claim.authority.level,
       truthStatus: claim.truthStatus,
     })),
     entities: packet.entityCandidates.map((candidate) => ({
@@ -652,7 +681,9 @@ function compileMaterialTool(input: JsonObject) {
       type: candidate.entityType,
       resolution: entityResolution(groupResolution.get(candidate.id)),
       locator: candidate.locator,
+      authority: candidate.authority.level,
     })),
+    relations: packet.relations,
     conflicts: packet.conflicts.map((conflict) => ({
       id: conflict.id,
       claimKey: conflict.claimKey,
@@ -671,7 +702,7 @@ function compileMaterialTool(input: JsonObject) {
   return {
     content: [{
       type: "text",
-      text: `Prepared ${structuredContent.claims.length} verified claim(s) and ${structuredContent.entities.length} entity candidate(s). Project-corpus coverage remains open.`,
+      text: `Prepared ${structuredContent.claims.length} verified claim(s), ${structuredContent.entities.length} entity candidate(s), and ${structuredContent.relations.length} exact-span relation(s). Project-corpus coverage remains open.`,
     }],
     structuredContent,
     isError: false,
@@ -828,6 +859,7 @@ function packetEvidence(packet: ReturnType<typeof buildMcpContextPacket>): Evide
       candidate.documentId === claim.documentId
       && candidate.start >= claim.start
       && candidate.end <= claim.end);
+    const sourceSemantics = packetAuthoritySemantics(claim.authority.level);
     return {
       id: claim.id,
       projectId: "mcp-upload-packet",
@@ -837,9 +869,9 @@ function packetEvidence(packet: ReturnType<typeof buildMcpContextPacket>): Evide
       locator: claim.locator,
       text: claim.quote,
       score: 1,
-      authority: "reference",
-      role: "reference",
-      lifecycle: "active",
+      authority: sourceSemantics.authority,
+      role: sourceSemantics.role,
+      lifecycle: sourceSemantics.lifecycle,
       claimKinds: [claimKindForGraph(claim.claimKind)],
       claimKind: claimKindForGraph(claim.claimKind),
       claimKey: claim.claimKey,
@@ -850,6 +882,9 @@ function packetEvidence(packet: ReturnType<typeof buildMcpContextPacket>): Evide
       validFromOrder: claim.temporal?.from ?? null,
       validToOrder: claim.temporal?.to ?? null,
       flags: ["compiled_atomic_span"],
+      parentEvidenceId: claim.documentId,
+      quoteStart: claim.start,
+      quoteEnd: claim.end,
       referentKeys: candidates.map((candidate) => candidate.referentKey),
       entityCandidates: candidates.map((candidate) => ({
         id: candidate.id,
@@ -862,6 +897,12 @@ function packetEvidence(packet: ReturnType<typeof buildMcpContextPacket>): Evide
       })),
     };
   });
+}
+
+function packetAuthoritySemantics(level: "reference" | "proposal" | "production_record"): Pick<EvidenceChunk, "authority" | "role" | "lifecycle"> {
+  if (level === "proposal") return { authority: "proposal", role: "proposal", lifecycle: "proposed" };
+  if (level === "production_record") return { authority: "production", role: "observation", lifecycle: "active" };
+  return { authority: "reference", role: "reference", lifecycle: "active" };
 }
 
 function claimKindForGraph(value: string): ClaimKind {
