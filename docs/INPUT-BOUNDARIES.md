@@ -28,6 +28,35 @@ The HTTP query route applies the same policy before authentication, storage,
 retrieval, or model work. The reviewed paid demonstration is narrower still:
 it accepts only its exact server-owned receipt and rejects every extra field.
 
+## Stateless MCP envelope
+
+The `/mcp` route accepts at most 32 KiB of JSON, including protocol and schema
+overhead. Its v3.2 reviewed-sample calls remain pinned to `vcs-demo-r1`.
+
+`continuity_compile_material` accepts at most eight named text documents, 64
+claim proposals, and 64 entity-mention proposals. The advertised per-document
+string limit is 20,000 characters, but the 32 KiB request ceiling is the
+effective aggregate transport limit. Exact quotes are verified before claims
+or entity candidates are admitted. An unlocatable or repeated quote without an
+occurrence number is rejected; instruction-like material remains untrusted
+data and cannot establish a claim. The packet closes only submitted-membership
+and proposal-verification coverage, never whole-project truth.
+
+`continuity_inspect_public_repository` permits one canonical public GitHub
+repository and optional ref. The handler resolves a full commit, examines no
+more than 1,000 tree entries, makes at most eight provider calls, reads at most
+six safe text files and 384 KiB, returns at most 20 KiB of excerpts, and ends at
+20 seconds without retry. It never accepts a GitHub token. A client must pass
+returned excerpts to the text compiler for exact entity, contradiction, or
+causal work.
+
+The question graph is in-memory and question-scoped. Build ceilings are 512
+input evidence records, 256 nodes, and 512 edges; traversal defaults to 72
+nodes, 144 edges, and depth 3 and can never exceed depth 6. Short bounded
+identity lookups bypass it. Semantic precondition/consequence links are
+admitted only when an upstream compiler or reviewed adapter binds them to an
+exact evidence ID.
+
 ## Upload envelope
 
 The source route parses at most one file and one value for each multipart

@@ -1,4 +1,10 @@
 export const CONTINUITY_ANSWER_VERSION = "continuity.answer.v7" as const;
+/**
+ * The router implementation can evolve without changing the public answer or
+ * MCP contract. Keep this separate from `CONTINUITY_ANSWER_VERSION`: v3.3 is
+ * an analysis/compiler upgrade, not a wire-format reset.
+ */
+export const AUTHORITY_ROUTER_VERSION = "3.3.0" as const;
 
 export type CanonAuthority =
   | "immutable"
@@ -42,6 +48,9 @@ export const CLAIM_KINDS = [
 export type ClaimKind = typeof CLAIM_KINDS[number];
 
 export type AnalysisMode = "answer_question" | "evaluate_change" | "trace_dependencies";
+
+/** The world in which the caller is asking the proposition to be evaluated. */
+export type TruthTarget = "packet_assertion" | "project_truth" | "observed_world";
 
 /**
  * Presentation is a server decision, not a caller-controlled analysis mode.
@@ -128,6 +137,35 @@ export type AnalysisCheckFinding = {
   evidenceIds: string[];
 };
 
+export type AnswerObligationKind =
+  | "direct_answer"
+  | "truth_and_verdict"
+  | "evidence_world"
+  | "decisive_evidence"
+  | "entity_resolution"
+  | "claim_boundary"
+  | "coverage_closure"
+  | "dependency_inventory"
+  | "reachability_certificate"
+  | "proposal_separation"
+  | "downstream_effects";
+
+/**
+ * Server-authored checklist used before and after model drafting. It prevents
+ * response compression from silently dropping a required invariant while
+ * keeping internal diagnostics out of fast lookup answers.
+ */
+export type AnswerObligation = {
+  id: string;
+  kind: AnswerObligationKind;
+  required: boolean;
+  visibility: "answer" | "receipt";
+  rationale: string;
+  claimKinds: ClaimKind[];
+  targetClaimKeys: string[];
+  evidenceIds: string[];
+};
+
 export type RetrievalLaneId = "authority" | "declared_state" | "execution" | "verification" | "change_history";
 
 export type RetrievalLane = {
@@ -176,9 +214,11 @@ export type AuthorityPolicy = {
 
 export type AnalysisRoute = {
   version: "continuity.route.v2";
+  routerVersion?: typeof AUTHORITY_ROUTER_VERSION;
   policyId: string;
   policyVersion: string;
   mode: AnalysisMode;
+  truthTarget?: TruthTarget;
   presentationDepth: PresentationDepth;
   budget: AnalysisBudget;
   claimKinds: ClaimKind[];
@@ -192,6 +232,7 @@ export type AnalysisRoute = {
     selectedByLane: Partial<Record<RetrievalLaneId, number>>;
   };
   coverage: CoverageAssessment;
+  answerObligations?: AnswerObligation[];
   diagnostics: string[];
 };
 
@@ -319,6 +360,11 @@ export type QueryRequest = {
   storyPosition?: number;
   targetPosition?: number;
   question: string;
+  /**
+   * Defaults to project truth. Only a trusted adapter should select a narrower
+   * packet/source-assertion world on behalf of a public caller.
+   */
+  truthTarget?: TruthTarget;
   analysisMode?: AnalysisMode;
   claimKinds?: ClaimKind[];
   conversation?: ConversationTurn[];
@@ -359,6 +405,12 @@ export type TrustedReachability = {
   obligations?: DependencyObligation[];
   diagnostics: string[];
   search: { complete: boolean; statesExplored: number; truncated: boolean };
+  /** Optional during v3.2 migration; v3.3 adapters should always emit one. */
+  certificate?: {
+    kind: "source_declared" | "bounded_arithmetic" | "exhaustive_graph";
+    summary: string;
+    evidenceIds: string[];
+  };
 };
 
 export type EvidenceReference = {
@@ -498,6 +550,11 @@ export type QueryResult = {
   validation: {
     repaired: boolean;
     issues: string[];
+    obligationResults?: Array<{
+      obligationId: string;
+      status: "satisfied" | "repaired" | "unresolved" | "not_applicable";
+      reason: string;
+    }>;
   };
 };
 

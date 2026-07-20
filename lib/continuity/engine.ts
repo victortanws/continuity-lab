@@ -9,6 +9,7 @@ import {
   type TrustedReachability,
 } from "./contracts";
 import { applyAssertionBoundary, assertionBoundaryFor } from "./assertion-boundary";
+import { auditAnswerObligations, compileAnswerObligations } from "./answer-obligations";
 import { boundaryCoversExactClaimKey, verifyCompletenessBoundary } from "./completeness-boundary";
 import { DEFAULT_AUTHORITY_POLICY } from "./policy/default";
 import { authorityWeight, planRetrieval, routeEvidence } from "./routing/authority-router";
@@ -62,6 +63,12 @@ export class ContinuityEngine {
     const trustedReachability = this.reachabilityEvaluator
       ? await this.reachabilityEvaluator.evaluate(normalizedRequest, routing.evidence, routing.route)
       : null;
+    routing.route.answerObligations = compileAnswerObligations(
+      normalizedRequest,
+      routing.route,
+      routing.evidence,
+      trustedReachability,
+    );
     const proposed = await this.reasoner.answer(
       normalizedRequest,
       routing.evidence,
@@ -80,6 +87,16 @@ export class ContinuityEngine {
     const displayedAnswer = this.reasoner.mode === "gpt-5.6-sol"
       ? sealGeneratedAnswer(validation.answer, routing.evidence, trustedReachability)
       : validation.answer;
+    const obligationResults = auditAnswerObligations(
+      displayedAnswer,
+      routing.route,
+      trustedReachability,
+    );
+    for (const obligation of obligationResults) {
+      if (obligation.status === "unresolved") {
+        validation.issues.push(`Answer obligation ${obligation.obligationId} remains unresolved: ${obligation.reason}`);
+      }
+    }
     if (displayedAnswer !== validation.answer) {
       validation.issues.push("Replaced generated explanatory prose with a server-composed summary of validated records");
     }
@@ -91,7 +108,11 @@ export class ContinuityEngine {
       retrievedEvidence: routing.evidence,
       routing: routing.route,
       trustedReachability,
-      validation: { repaired: validation.issues.length > 0, issues: validation.issues },
+      validation: {
+        repaired: validation.issues.length > 0,
+        issues: validation.issues,
+        obligationResults,
+      },
     };
   }
 }
@@ -329,6 +350,7 @@ export const CONTINUITY_INPUT_LIMITS = Object.freeze({
 
 const PROJECT_ID_RUNTIME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const VERDICT_VALUES = new Set(["SUPPORTED", "CONFLICT", "AMBIGUOUS", "UNREACHABLE", "INSUFFICIENT_EVIDENCE", "PROPOSAL"]);
+const TRUTH_TARGET_VALUES = new Set(["packet_assertion", "project_truth", "observed_world"]);
 const AUTHORITY_VALUES = new Set(["immutable", "canon", "retcon", "production", "proposal", "reference"]);
 const ROLE_VALUES = new Set([
   "intent", "decision", "configuration", "implementation", "test", "observation", "proposal",
@@ -351,6 +373,9 @@ export function assertQueryRequestEnvelope(request: QueryRequest): void {
     throw new ContinuityInputError("projectId contains unsupported characters.");
   }
   assertRequiredString(request.question, "question", CONTINUITY_INPUT_LIMITS.questionBytes, "request_limit_exceeded");
+  if (request.truthTarget !== undefined && !TRUTH_TARGET_VALUES.has(request.truthTarget)) {
+    throw new ContinuityInputError("truthTarget is unsupported.");
+  }
   assertOptionalString(request.projectRevision, "projectRevision", CONTINUITY_INPUT_LIMITS.requestMetadataBytes);
   assertOptionalString(request.timeScope, "timeScope", CONTINUITY_INPUT_LIMITS.requestMetadataBytes, true);
   assertOptionalString(request.temporalAxis, "temporalAxis", 80, true);

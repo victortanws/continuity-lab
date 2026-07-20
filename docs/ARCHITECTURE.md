@@ -43,8 +43,10 @@ not yet wired into the browser production-audit flow.
 It does **not** yet persist a corpus-wide entity or transition graph,
 deterministically compile arbitrary code or images into transitions, expose
 private workspaces through authenticated MCP, receive GitHub webhooks, or offer
-a reviewed promotion UI. A stateless `/mcp` transport is implemented for the
-immutable reviewed VCS sample only.
+a reviewed promotion UI. A stateless `/mcp` transport exposes the immutable
+reviewed VCS sample, a caller-supplied exact-span text-packet boundary, and a
+small anonymous public-GitHub excerpt inspector. The latter two prepare
+evidence for reasoning by the MCP client; they are not persisted workspaces.
 Transition evaluation is real only after a trusted compiler or curated adapter
 has produced the graph. Screenshot/image understanding and OCR are not wired
 into the MVP; text descriptions can be compiled upstream into cited snapshots.
@@ -87,13 +89,13 @@ reachability stays unknown.
 |---|---|---|
 | Upload | Paste text; up to 12 sequential uploads per browser selection; UTF-8 text/structured formats; operator-only PDF/Office preview | XLS/XLSX, standalone images, OCR-only/scanned documents, reliable arbitrary binary extraction |
 | Entity work | Question-scoped exact-span candidates, separate same-name candidates, cited ambiguity | Durable corpus-wide Entity/Alias/SameAs graph and reviewed merge UI |
-| Questions | Revision-pinned cited answers when OpenAI indexing is configured; explicit conflict/coverage; reviewed VCS demo without live retrieval | Offline arbitrary-workspace Q&A without a provider; exhaustive corpus understanding |
+| Questions | Revision-pinned cited answers when OpenAI indexing is configured; explicit conflict/coverage; reviewed VCS demo; stateless exact-span receipts that ChatGPT can reason over without a server-side model call | Standalone deterministic natural-language answers over every arbitrary workspace; exhaustive corpus understanding |
 | Change ideas | Provisional assumptions, typed dependencies, risks, and validation; never automatic canon promotion | Reviewed approval/promotion workflow and automatic arbitrary-project simulation |
-| Causality | Deterministic evaluator and server obligations for a curated or trusted compiled graph; generic adjacent-snapshot gap core | General automatic source-to-transition compilation |
+| Causality | Deterministic evaluator and server obligations for a curated or trusted compiled graph; generic adjacent-snapshot gap core; bounded in-memory question graph over verified atomic records | General automatic source-to-transition compilation and durable whole-corpus graph |
 | Visual production | Reusable audit core over already-extracted observations | Raw image understanding, OCR/region evidence adapter, and production-audit API/UI |
 | Inspection economics | Exact bounded subset optimizer over residual loss plus effort; correlation-aware mandatory gates; server-registry calibration provenance and hard structural/cost/time ceilings | Calibrated project failure histories, browser controls, and automatic attempt-log feedback |
-| GitHub | Bounded allowlisted commit-pinned snapshot synchronization | GitHub App installations, webhooks, incremental sync, or a live working-tree mount |
-| MCP | Stateless read-only `/mcp` transport for three tools over the pinned VCS sample | Authenticated private-workspace transport, arbitrary project resources, and connector mutation tools |
+| GitHub | Bounded allowlisted commit-pinned snapshot synchronization plus a smaller anonymous public-repository MCP preview | GitHub App installations, webhooks, incremental sync, private MCP repositories, or a live working-tree mount |
+| MCP | Stateless read-only `/mcp` transport: three pinned-VCS tools, exact-span text-packet compilation, and bounded public-GitHub excerpts | Authenticated persisted/private-workspace transport, arbitrary project resources, and connector mutation tools |
 | Hosting | Sites configuration exists in the repository | Repository state alone does not prove that this candidate is the currently deployed Site version |
 
 ## Three operations
@@ -359,9 +361,15 @@ The resolved “canon” is a versioned projection over source assertions. It is
 Long prose such as a Gutenberg text can be labeled as narrative source text and
 indexed without claiming that every entity or causal dependency was understood
 at upload time. Today a question retrieves an evidence neighborhood, resolves
-question-scoped entities, and returns a validated dependency slice with source
-locators. Corpus-wide entity resolution, persisted graph slices, background
-densification, and explicit entity-pass states are later phases.
+question-scoped entities, and can build a deterministic in-memory graph from
+already verified atomic records. A short `who/what/where/when` lookup bypasses
+graph work. Causal, change, sequence, conflict, and multipart questions may
+receive one breadth-first traversal capped at 256 nodes, 512 edges, and depth 6.
+The graph records its coverage and truncation; open corpus coverage can never
+prove that no other path exists. Precondition and consequence links enter only
+when a verified compiler or reviewed adapter supplies them against an admitted
+exact evidence span. Corpus-wide entity resolution, persisted graph slices,
+background densification, and explicit entity-pass states are later phases.
 
 ## Model and deterministic responsibilities
 
@@ -379,7 +387,7 @@ remain future work. Retrieval score is relevance, never truth confidence.
 
 Conversation state can improve latency, but prior assistant prose is never evidence. Every answer remains replayable from its revision, question, prompt version, and evidence references. Follow-ups should carry explicit entity or analysis references.
 
-## Future MCP surface
+## MCP surface and future boundary
 
 The MCP server is a thin transport over the same core. Compatibility tools
 `search` and `fetch` provide URL-backed discovery and exact-source retrieval;
@@ -388,13 +396,21 @@ and `continuity_analyze_change`. Stable resources use
 `continuity://projects/{project}/...` URIs. GitHub synchronization, source
 mutation, and canon approval are separate authenticated and consented tools.
 
-The reviewed-sample transport implements initialization, tool discovery, and
-three read-only calls at `/mcp`. It is pinned to `vcs-demo-r1`, invokes only the
-deterministic demonstration engine, and refuses arbitrary projects or revisions;
-it does not fetch GitHub, invoke a paid provider, or write project state. A
-production private-workspace integration still needs connector authentication
-and authorization, stable resource handlers, consented mutation tools, quotas,
-and deployment monitoring.
+The transport implements initialization, tool discovery, and five read-only
+calls at `/mcp`. Three remain pinned to `vcs-demo-r1` and invoke only the
+deterministic demonstration engine. `continuity_compile_material` verifies
+caller-proposed exact spans and source-scoped entity mentions in a bounded text
+packet. `continuity_inspect_public_repository` performs one anonymous,
+commit-pinned, question-scoped GitHub read and returns bounded excerpts; exact
+claims from those excerpts must still pass through the compiler. None invokes
+an OpenAI API model, accepts a GitHub/OpenAI token, writes project state, or
+promotes source assertions to canon.
+
+The transport contract is `continuity.mcp.v1`, independent of authority-router
+version metadata. This keeps the v3.2 tool names and schemas stable while v3.3
+adds capabilities. A production private-workspace integration still needs
+connector authentication and per-project authorization, stable resource
+handlers, durable quotas, consented mutation tools, and deployment monitoring.
 
 ## External-validity gate
 

@@ -55,6 +55,8 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
     "continuity_answer_question",
     "continuity_trace_dependencies",
     "continuity_analyze_change",
+    "continuity_compile_material",
+    "continuity_inspect_public_repository",
   ]);
   for (const tool of listed.body.result.tools) {
     assert.ok(tool.title);
@@ -62,12 +64,85 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
     assert.equal(tool.outputSchema.additionalProperties, false);
     assert.ok(tool.outputSchema.required.includes("coverage"));
     assert.equal(tool.annotations.readOnlyHint, true);
-    assert.equal(tool.annotations.openWorldHint, false);
-    assert.equal(tool.inputSchema.properties.projectId.maxLength, 128);
+    assert.equal(tool.annotations.openWorldHint, tool.name === "continuity_inspect_public_repository");
+    assert.equal(tool.annotations.idempotentHint, tool.name !== "continuity_inspect_public_repository");
+    assert.deepEqual(tool.securitySchemes, [{ type: "noauth" }]);
+    assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
+    if (tool.inputSchema.properties.projectId) {
+      assert.equal(tool.inputSchema.properties.projectId.maxLength, 128);
+    }
   }
 
   const ping = await call({ jsonrpc: "2.0", id: "ping", method: "ping" });
   assert.deepEqual(ping.body.result, {});
+});
+
+test("uploaded text is exact-span verified through the keyless MCP context tool", async () => {
+  const compiled = await call(toolCall("compile", "continuity_compile_material", {
+    question: "Who is Grandma, and does the gate open?",
+    documents: [
+      { name: "one.md", text: "Grandma (CHR-1) opens the gate." },
+      { name: "two.md", text: "Grandma (CHR-2) does not open the gate." },
+    ],
+    claims: [
+      { documentName: "one.md", quote: "Grandma (CHR-1) opens the gate.", claimKind: "observed", subject: "Grandma", predicate: "open", object: "gate", polarity: "positive" },
+      { documentName: "two.md", quote: "Grandma (CHR-2) does not open the gate.", claimKind: "observed", subject: "Grandma", predicate: "open", object: "gate", polarity: "negative" },
+    ],
+    entityMentions: [
+      { documentName: "one.md", quote: "Grandma (CHR-1) opens the gate.", mention: "Grandma", explicitId: "CHR-1", entityType: "character" },
+      { documentName: "two.md", quote: "Grandma (CHR-2) does not open the gate.", mention: "Grandma", explicitId: "CHR-2", entityType: "character" },
+    ],
+  }));
+
+  assert.equal(compiled.body.result.isError, false);
+  assert.equal(compiled.body.result.structuredContent.contractVersion, "continuity.mcp.v1");
+  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.3.0");
+  assert.equal(compiled.body.result.structuredContent.coverage.completeForProjectCorpus, false);
+  assert.equal(compiled.body.result.structuredContent.claims.length, 2);
+  assert.equal(compiled.body.result.structuredContent.entities.every((entity) => entity.resolution === "ambiguous"), true);
+  assert.equal(compiled.body.result.structuredContent.conflicts.length, 1);
+  assert.equal(compiled.body.result.structuredContent.route.graphUsed, true);
+  assert.ok(compiled.body.result.structuredContent.route.validators.length <= 4);
+});
+
+test("the public-repository MCP tool uses anonymous bounded GitHub reads and pins the commit", async () => {
+  const previousFetch = globalThis.fetch;
+  const commit = "a".repeat(40);
+  const tree = "b".repeat(40);
+  const blob = "c".repeat(40);
+  const source = "The payment resolver emits grandma-surgery-funded after $47,000 is paid.";
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), authorization: new Headers(init.headers).get("authorization") });
+    if (String(url).includes("/commits/HEAD")) {
+      return Response.json({ sha: commit, commit: { tree: { sha: tree }, committer: { date: "2026-07-20T00:00:00Z" } } });
+    }
+    if (String(url).includes(`/git/trees/${tree}`)) {
+      return Response.json({
+        tree: [{ path: "canon/payment.md", type: "blob", mode: "100644", sha: blob, size: new TextEncoder().encode(source).byteLength }],
+        truncated: false,
+      });
+    }
+    if (String(url).includes(`/git/blobs/${blob}`)) {
+      return Response.json({ content: btoa(source), encoding: "base64", size: new TextEncoder().encode(source).byteLength, sha: blob });
+    }
+    throw new Error(`Unexpected URL ${url}`);
+  };
+  try {
+    const inspected = await call(toolCall("repo", "continuity_inspect_public_repository", {
+      repository: "example/public-story",
+      question: "What produces grandma-surgery-funded?",
+    }));
+
+    assert.equal(inspected.body.result.isError, false);
+    assert.equal(inspected.body.result.structuredContent.pinnedCommit, commit);
+    assert.equal(inspected.body.result.structuredContent.excerpts.length, 1);
+    assert.match(inspected.body.result.structuredContent.excerpts[0].locator, new RegExp(commit));
+    assert.ok(calls.length <= 8);
+    assert.ok(calls.every((item) => item.authorization === null), "the anonymous public tool must not use a server GitHub credential");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test("the three MCP tools execute deterministic VCS analysis without network or provider calls", async () => {
@@ -106,6 +181,22 @@ test("the three MCP tools execute deterministic VCS analysis without network or 
   } finally {
     globalThis.fetch = previousFetch;
   }
+});
+
+test("a natural capability question escalates to the bounded VCS dependency proof", async () => {
+  const result = await call(toolCall("earn", "continuity_answer_question", {
+    projectId: "vcs-demo",
+    projectRevision: VCS_DEMO_REVISION,
+    question: "Can the player earn $47,000 in the prototype?",
+  }));
+
+  assert.equal(result.body.result.isError, false);
+  assert.equal(result.body.result.structuredContent.verdict, "UNREACHABLE");
+  assert.equal(result.body.result.structuredContent.reachability.status, "unreachable_within_scope");
+  assert.ok(result.body.result.structuredContent.dependencies.some(
+    (edge) => edge.claimKey === "producer:grandma-surgery-funded" && edge.status === "blocked",
+  ));
+  assert.match(result.body.result.structuredContent.answer, /completion path is missing|no transition/i);
 });
 
 test("MCP rejects arbitrary workspaces and revisions as clear tool errors without syncing", async () => {

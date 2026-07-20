@@ -1,4 +1,10 @@
-import type { QueryRequest, QueryResult } from "@/lib/continuity/contracts";
+import {
+  AUTHORITY_ROUTER_VERSION,
+  type ClaimKind,
+  type EvidenceChunk,
+  type QueryRequest,
+  type QueryResult,
+} from "@/lib/continuity/contracts";
 import {
   demoTargetClaimKeys,
   DemoReachabilityEvaluator,
@@ -9,8 +15,22 @@ import {
   VCS_DEMO_REVISION,
 } from "@/lib/continuity/demo";
 import { ContinuityEngine, ContinuityInputError } from "@/lib/continuity/engine";
+import { ConnectorExecutionBudget } from "@/lib/continuity/http/connector-execution";
 import { guardRequestBody, readJsonBodyBounded, RequestBodyError } from "@/lib/continuity/http/security";
-import { continuityMcpTools } from "@/lib/continuity/mcp-contract";
+import {
+  buildMcpContextPacket,
+  inspectPublicGitHubRepository,
+  McpContextError,
+  type McpContextInput,
+} from "@/lib/continuity/mcp-context";
+import { CONTINUITY_MCP_CONTRACT_VERSION, continuityMcpTools } from "@/lib/continuity/mcp-contract";
+import {
+  buildQuestionGraph,
+  planQuestionGraphUse,
+  queryQuestionGraph,
+  type QuestionGraphQueryResult,
+} from "@/lib/continuity/question-graph";
+import { GitHubRepositoryProvider, RepositoryProviderError } from "@/lib/continuity/repositories/github";
 
 export const runtime = "edge";
 
@@ -18,13 +38,22 @@ const MCP_PROTOCOL_VERSION = "2025-06-18";
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_TEXT_LENGTH = 8_000;
 const MAX_CONTEXT_REFS = 20;
+const PUBLIC_REPOSITORY_DEADLINE_MS = 20_000;
+const PUBLIC_REPOSITORY_MAX_CALLS = 8;
+const PUBLIC_REPOSITORY_MAX_CONCURRENT_PER_ISOLATE = 2;
+let publicRepositoryCallsInFlight = 0;
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const EXPOSED_TOOL_NAMES = [
   "continuity_answer_question",
   "continuity_trace_dependencies",
   "continuity_analyze_change",
+  "continuity_compile_material",
+  "continuity_inspect_public_repository",
 ] as const;
 type ExposedToolName = typeof EXPOSED_TOOL_NAMES[number];
+type ReviewedToolName = Extract<ExposedToolName,
+  "continuity_answer_question" | "continuity_trace_dependencies" | "continuity_analyze_change">;
+type ContextToolName = Exclude<ExposedToolName, ReviewedToolName>;
 type JsonRpcId = string | number | null;
 type JsonObject = Record<string, unknown>;
 
@@ -49,14 +78,17 @@ const TOOL_ANNOTATIONS = Object.freeze({
   idempotentHint: true,
   openWorldHint: false,
 });
+const NOAUTH_SECURITY_SCHEMES = Object.freeze([{ type: "noauth" as const }]);
 
 const TOOL_TITLES: Record<ExposedToolName, string> = {
   continuity_answer_question: "Answer a continuity question",
   continuity_trace_dependencies: "Trace continuity dependencies",
   continuity_analyze_change: "Analyze a proposed change",
+  continuity_compile_material: "Verify uploaded or pasted material",
+  continuity_inspect_public_repository: "Inspect a public GitHub repository",
 };
 
-const TOOL_OUTPUT_SCHEMA = {
+const REVIEWED_TOOL_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
@@ -148,6 +180,152 @@ const TOOL_OUTPUT_SCHEMA = {
   },
 } as const;
 
+const CONTEXT_TOOL_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "contractVersion", "routerVersion", "sourceKind", "question", "route",
+    "coverage", "claims", "entities", "conflicts", "graph", "rejected", "diagnostics",
+  ],
+  properties: {
+    contractVersion: { type: "string", enum: [CONTINUITY_MCP_CONTRACT_VERSION] },
+    routerVersion: { type: "string", enum: [AUTHORITY_ROUTER_VERSION] },
+    sourceKind: { type: "string", enum: ["uploaded_text"] },
+    question: { type: "string" },
+    route: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "graphUsed", "validators", "reason"],
+      properties: {
+        path: { type: "string", enum: ["direct_lookup", "question_graph"] },
+        graphUsed: { type: "boolean" },
+        validators: { type: "array", items: { type: "string" } },
+        reason: { type: "string" },
+      },
+    },
+    coverage: {
+      type: "object",
+      additionalProperties: false,
+      required: ["packetMembership", "proposalVerification", "completeForProjectCorpus"],
+      properties: {
+        packetMembership: { type: "string", enum: ["closed"] },
+        proposalVerification: { type: "string", enum: ["closed", "partial"] },
+        completeForProjectCorpus: { type: "boolean", enum: [false] },
+      },
+    },
+    claims: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "documentId", "quote", "locator", "claimKind", "claimKey", "polarity", "temporal", "truthStatus"],
+        properties: {
+          id: { type: "string" }, documentId: { type: "string" }, quote: { type: "string" }, locator: { type: "string" },
+          claimKind: { type: "string" }, claimKey: { type: "string" }, polarity: { type: "string", enum: ["positive", "negative"] },
+          temporal: { type: ["object", "null"] },
+          truthStatus: { type: "string", enum: ["source_assertion"] },
+        },
+      },
+    },
+    entities: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "mention", "type", "resolution", "locator"],
+        properties: {
+          id: { type: "string" }, mention: { type: "string" }, type: { type: "string" },
+          resolution: { type: "string", enum: ["resolved", "candidate", "ambiguous"] }, locator: { type: "string" },
+        },
+      },
+    },
+    conflicts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "claimKey", "status", "positiveClaimIds", "negativeClaimIds"],
+        properties: {
+          id: { type: "string" }, claimKey: { type: "string" }, status: { type: "string", enum: ["source_disagreement"] },
+          positiveClaimIds: { type: "array", items: { type: "string" } }, negativeClaimIds: { type: "array", items: { type: "string" } },
+        },
+      },
+    },
+    graph: {
+      type: ["object", "null"],
+      additionalProperties: false,
+      required: ["nodes", "edges", "receipt"],
+      properties: {
+        nodes: { type: "array", items: { type: "object" } },
+        edges: { type: "array", items: { type: "object" } },
+        receipt: { type: "object" },
+      },
+    },
+    rejected: { type: "array", items: { type: "object" } },
+    diagnostics: { type: "array", items: { type: "string" } },
+  },
+} as const;
+
+const REPOSITORY_TOOL_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "contractVersion", "routerVersion", "sourceKind", "question", "repository",
+    "requestedRef", "pinnedCommit", "coverage", "excerpts", "omitted", "usage", "diagnostics",
+  ],
+  properties: {
+    contractVersion: { type: "string", enum: [CONTINUITY_MCP_CONTRACT_VERSION] },
+    routerVersion: { type: "string", enum: [AUTHORITY_ROUTER_VERSION] },
+    sourceKind: { type: "string", enum: ["public_github"] },
+    question: { type: "string" }, repository: { type: "string" }, requestedRef: { type: "string" }, pinnedCommit: { type: "string" },
+    coverage: {
+      type: "object",
+      additionalProperties: false,
+      required: ["membershipPinned", "treeComplete", "semanticClosure", "completeForProjectTruth", "reasons"],
+      properties: {
+        membershipPinned: { type: "boolean", enum: [true] }, treeComplete: { type: "boolean" },
+        semanticClosure: { type: "string", enum: ["partial", "open"] }, completeForProjectTruth: { type: "boolean", enum: [false] },
+        reasons: { type: "array", items: { type: "string" } },
+      },
+    },
+    excerpts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "path", "locator", "text", "relevanceScore"],
+        properties: {
+          id: { type: "string" }, path: { type: "string" }, locator: { type: "string" }, text: { type: "string" }, relevanceScore: { type: "number" },
+        },
+      },
+    },
+    omitted: { type: "array", items: { type: "object" } },
+    usage: {
+      type: "object", additionalProperties: false, required: ["providerCalls", "filesRead", "bytesRead", "excerptBytes"],
+      properties: {
+        providerCalls: { type: "integer" }, filesRead: { type: "integer" }, bytesRead: { type: "integer" }, excerptBytes: { type: "integer" },
+      },
+    },
+    diagnostics: { type: "array", items: { type: "string" } },
+  },
+} as const;
+
+function outputSchemaFor(name: ExposedToolName) {
+  if (name === "continuity_compile_material") return CONTEXT_TOOL_OUTPUT_SCHEMA;
+  if (name === "continuity_inspect_public_repository") return REPOSITORY_TOOL_OUTPUT_SCHEMA;
+  return REVIEWED_TOOL_OUTPUT_SCHEMA;
+}
+
+function isContextTool(name: ExposedToolName): name is ContextToolName {
+  return name === "continuity_compile_material" || name === "continuity_inspect_public_repository";
+}
+
+function annotationsFor(name: ExposedToolName) {
+  return name === "continuity_inspect_public_repository"
+    ? { ...TOOL_ANNOTATIONS, idempotentHint: false, openWorldHint: true }
+    : TOOL_ANNOTATIONS;
+}
+
 export async function POST(request: Request): Promise<Response> {
   const guard = guardRequestBody(request, { kind: "json", maxBytes: MAX_BODY_BYTES });
   if (guard) return withNoStore(guard);
@@ -189,8 +367,8 @@ export async function POST(request: Request): Promise<Response> {
     return rpcResult(id, {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: "continuity-lab-reviewed-sample", version: "0.1.0" },
-      instructions: "Immutable, read-only, stateless access to vcs-demo at vcs-demo-r1. Tool calls never synchronize a repository or invoke a paid model provider. Change analyses are proposals and never become canon.",
+      serverInfo: { name: "continuity-lab-reviewed-sample", version: "0.2.0" },
+      instructions: "Read-only, stateless continuity tools. Reviewed VCS tools never synchronize a repository or invoke a paid model provider. For uploaded or pasted material, read only question-relevant text, propose exact quotes and entity mentions to continuity_compile_material, then answer from the verified receipt; rejected or absent claims remain unknown. For a public GitHub URL, call continuity_inspect_public_repository first, then pass returned excerpts to continuity_compile_material when exact entity, conflict, or causal structure is needed. Neither path promotes source assertions to project canon. Change analyses are proposals and never become canon.",
     });
   }
 
@@ -220,8 +398,10 @@ export async function POST(request: Request): Promise<Response> {
         title: TOOL_TITLES[name],
         description: continuityMcpTools[name].description,
         inputSchema: continuityMcpTools[name].inputSchema,
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-        annotations: TOOL_ANNOTATIONS,
+        outputSchema: outputSchemaFor(name),
+        annotations: annotationsFor(name),
+        securitySchemes: NOAUTH_SECURITY_SCHEMES,
+        _meta: { securitySchemes: NOAUTH_SECURITY_SCHEMES },
       })),
     });
   }
@@ -235,6 +415,21 @@ export async function POST(request: Request): Promise<Response> {
     }
     const name = payload.params.name as ExposedToolName;
     const argumentsValue = payload.params.arguments;
+    if (isContextTool(name)) {
+      const inputError = validateContextToolArguments(name, argumentsValue);
+      if (inputError) return rpcResult(id, toolError("invalid_arguments", inputError));
+      try {
+        const result = name === "continuity_compile_material"
+          ? compileMaterialTool(argumentsValue)
+          : await inspectRepositoryTool(argumentsValue);
+        return rpcResult(id, result);
+      } catch (error) {
+        const code = error instanceof McpContextError ? error.code : "context_preparation_failed";
+        const message = publicContextError(error);
+        return rpcResult(id, toolError(code, message));
+      }
+    }
+
     const inputError = validateToolArguments(name, argumentsValue);
     if (inputError) return rpcResult(id, toolError("invalid_arguments", inputError));
 
@@ -255,7 +450,7 @@ export async function POST(request: Request): Promise<Response> {
   return rpcError(id, -32601, `Method ${payload.method} is not supported by this stateless MCP transport.`, 404);
 }
 
-function queryForTool(name: ExposedToolName, input: JsonObject): QueryRequest {
+function queryForTool(name: ReviewedToolName, input: JsonObject): QueryRequest {
   const common = {
     projectId: VCS_DEMO_PROJECT_ID,
     projectRevision: VCS_DEMO_REVISION,
@@ -263,13 +458,20 @@ function queryForTool(name: ExposedToolName, input: JsonObject): QueryRequest {
   };
   if (name === "continuity_answer_question") {
     const question = (input.question as string).trim();
+    const targetClaimKeys = demoTargetClaimKeys(question);
     return {
       ...common,
       question,
-      analysisMode: "answer_question",
-      timeScope: optionalTrimmedString(input.timeScope, 240),
+      analysisMode: targetClaimKeys.length ? "trace_dependencies" : "answer_question",
+      timeScope: optionalTrimmedString(input.timeScope, 240)
+        ?? (targetClaimKeys.length ? "through the current VCS demonstration build" : null),
+      ...(targetClaimKeys.length ? {
+        temporalAxis: "day",
+        storyPosition: 8,
+        targetPosition: 24,
+      } : {}),
       contextRefs: cleanContextRefs(input.contextRefs),
-      targetClaimKeys: demoTargetClaimKeys(question),
+      targetClaimKeys,
     };
   }
   if (name === "continuity_trace_dependencies") {
@@ -303,7 +505,268 @@ function queryForTool(name: ExposedToolName, input: JsonObject): QueryRequest {
   };
 }
 
-function validateToolArguments(name: ExposedToolName, input: JsonObject): string | null {
+function validateContextToolArguments(name: ContextToolName, input: JsonObject): string | null {
+  const allowed = name === "continuity_compile_material"
+    ? new Set(["question", "documents", "claims", "entityMentions"])
+    : new Set(["repository", "question", "requestedRef"]);
+  const unexpected = Object.keys(input).filter((key) => !allowed.has(key));
+  if (unexpected.length) return `Unexpected argument${unexpected.length === 1 ? "" : "s"}: ${unexpected.join(", ")}.`;
+  if (typeof input.question !== "string" || !input.question.trim()) return "question is required.";
+  const questionLimit = name === "continuity_compile_material" ? MAX_TEXT_LENGTH : 4_096;
+  if (new TextEncoder().encode(input.question).byteLength > questionLimit) {
+    return `question exceeds ${questionLimit} UTF-8 bytes.`;
+  }
+  if (name === "continuity_compile_material") {
+    if (!Array.isArray(input.documents) || input.documents.length < 1) return "documents must be a non-empty array.";
+    return null;
+  }
+  if (typeof input.repository !== "string" || !input.repository.trim() || input.repository.length > 240) {
+    return "repository must be a bounded owner/repository value or canonical GitHub URL.";
+  }
+  if (input.requestedRef !== undefined
+    && (typeof input.requestedRef !== "string" || !input.requestedRef.trim() || input.requestedRef.length > 200)) {
+    return "requestedRef must be a non-empty string no longer than 200 characters.";
+  }
+  return null;
+}
+
+function compileMaterialTool(input: JsonObject) {
+  const question = (input.question as string).trim();
+  const packet = buildMcpContextPacket({
+    documents: input.documents,
+    claims: input.claims,
+    entityMentions: input.entityMentions,
+  } as McpContextInput);
+  const route = planQuestionGraphUse(question);
+  const evidence = packetEvidence(packet);
+  let graph: QuestionGraphQueryResult | null = null;
+  if (route.useGraph && evidence.length) {
+    const compiledGraph = buildQuestionGraph({
+      projectId: "mcp-upload-packet",
+      projectRevision: packet.documents.map((document) => document.contentFingerprint).join(":"),
+      evidence,
+      coverage: {
+        scope: "verified claims in the submitted packet",
+        closure: "open",
+        trustedComplete: false,
+        truncated: packet.proposalCoverage.closure === "partial",
+        failures: [],
+        deferredEvidenceIds: [],
+        deferredSources: [],
+        excludedSources: [],
+      },
+    });
+    graph = queryQuestionGraph(compiledGraph, { question });
+  }
+  const groupResolution = new Map(packet.entityCandidateGroups.flatMap((group) =>
+    group.candidateIds.map((candidateId) => [candidateId, group.resolution] as const)));
+  const structuredContent = {
+    contractVersion: CONTINUITY_MCP_CONTRACT_VERSION,
+    routerVersion: AUTHORITY_ROUTER_VERSION,
+    sourceKind: "uploaded_text" as const,
+    question,
+    route: {
+      path: route.path,
+      graphUsed: graph !== null,
+      validators: [
+        "input_and_instruction_boundary",
+        "exact_span_and_entity_boundary",
+        "authority_and_coverage_boundary",
+        ...(graph ? ["bounded_question_graph"] : []),
+      ],
+      reason: route.reason,
+    },
+    coverage: {
+      packetMembership: packet.membershipCoverage.closure,
+      proposalVerification: packet.proposalCoverage.closure,
+      completeForProjectCorpus: false as const,
+    },
+    claims: packet.claims.map((claim) => ({
+      id: claim.id,
+      documentId: claim.documentId,
+      quote: claim.quote,
+      locator: claim.locator,
+      claimKind: claim.claimKind,
+      claimKey: claim.claimKey,
+      polarity: claim.polarity,
+      temporal: claim.temporal,
+      truthStatus: claim.truthStatus,
+    })),
+    entities: packet.entityCandidates.map((candidate) => ({
+      id: candidate.id,
+      mention: candidate.mention,
+      type: candidate.entityType,
+      resolution: entityResolution(groupResolution.get(candidate.id)),
+      locator: candidate.locator,
+    })),
+    conflicts: packet.conflicts.map((conflict) => ({
+      id: conflict.id,
+      claimKey: conflict.claimKey,
+      status: conflict.status,
+      positiveClaimIds: conflict.positiveClaimIds,
+      negativeClaimIds: conflict.negativeClaimIds,
+    })),
+    graph,
+    rejected: packet.rejectedProposals,
+    diagnostics: [
+      ...packet.diagnostics,
+      ...(packet.claims.length ? [] : ["No exact-span claim was verified; answer only from the visible source text or ask for a narrower extraction."]),
+      ...(route.useGraph && !graph ? ["The question called for graph reasoning, but no verified atomic claim was available to admit into the graph."] : []),
+    ],
+  };
+  return {
+    content: [{
+      type: "text",
+      text: `Prepared ${structuredContent.claims.length} verified claim(s) and ${structuredContent.entities.length} entity candidate(s). Project-corpus coverage remains open.`,
+    }],
+    structuredContent,
+    isError: false,
+  };
+}
+
+async function inspectRepositoryTool(input: JsonObject) {
+  if (publicRepositoryCallsInFlight >= PUBLIC_REPOSITORY_MAX_CONCURRENT_PER_ISOLATE) {
+    throw new McpContextError("The public repository inspector is at its bounded concurrency limit; try again after an in-flight call completes.", "repository_limit");
+  }
+  publicRepositoryCallsInFlight += 1;
+  let inspection;
+  try {
+    const executionBudget = new ConnectorExecutionBudget({
+      deadlineAt: Date.now() + PUBLIC_REPOSITORY_DEADLINE_MS,
+      maxCalls: PUBLIC_REPOSITORY_MAX_CALLS,
+    });
+    const provider = new GitHubRepositoryProvider({
+      timeoutMs: 8_000,
+      executionBudget,
+    });
+    inspection = await inspectPublicGitHubRepository(provider, {
+      repository: input.repository as string,
+      question: (input.question as string).trim(),
+      requestedRef: typeof input.requestedRef === "string" ? input.requestedRef.trim() : undefined,
+      limits: {
+        maxTreeEntries: 1_000,
+        maxFiles: 6,
+        maxProviderCalls: PUBLIC_REPOSITORY_MAX_CALLS,
+        maxFileBytes: 96 * 1024,
+        maxTotalFileBytes: 384 * 1024,
+        maxExcerptBytesPerFile: 4 * 1024,
+        maxTotalExcerptBytes: 20 * 1024,
+        maxQuestionBytes: 4 * 1024,
+      },
+    });
+  } finally {
+    publicRepositoryCallsInFlight = Math.max(0, publicRepositoryCallsInFlight - 1);
+  }
+  const structuredContent = {
+    contractVersion: CONTINUITY_MCP_CONTRACT_VERSION,
+    routerVersion: AUTHORITY_ROUTER_VERSION,
+    sourceKind: "public_github" as const,
+    question: inspection.question,
+    repository: inspection.repository.fullName,
+    requestedRef: inspection.requestedRef,
+    pinnedCommit: inspection.pinnedCommit,
+    coverage: {
+      membershipPinned: inspection.membershipCoverage.pinned,
+      treeComplete: inspection.membershipCoverage.treeComplete,
+      semanticClosure: inspection.semanticCoverage.closure,
+      completeForProjectTruth: inspection.semanticCoverage.completeForProjectTruth,
+      reasons: inspection.semanticCoverage.reasons,
+    },
+    excerpts: inspection.excerpts.map((excerpt) => ({
+      id: excerpt.id,
+      path: excerpt.path,
+      locator: excerpt.locator,
+      text: excerpt.text,
+      relevanceScore: excerpt.relevanceScore,
+    })),
+    omitted: inspection.omitted,
+    usage: inspection.usage,
+    diagnostics: [
+      "This was an anonymous read of a public repository; no GitHub or OpenAI credential was accepted or used.",
+      "The commit is pinned, but the excerpt set is question-scoped and cannot prove a universal absence in the repository.",
+      "For exact entity resolution or causal verification, call continuity_compile_material with the returned excerpts and exact-span proposals.",
+    ],
+  };
+  return {
+    content: [{
+      type: "text",
+      text: `Pinned ${structuredContent.repository} at ${structuredContent.pinnedCommit} and returned ${structuredContent.excerpts.length} bounded excerpt(s); semantic coverage is ${structuredContent.coverage.semanticClosure}.`,
+    }],
+    structuredContent,
+    isError: false,
+  };
+}
+
+function packetEvidence(packet: ReturnType<typeof buildMcpContextPacket>): EvidenceChunk[] {
+  const documents = new Map(packet.documents.map((document) => [document.id, document]));
+  const groupResolution = new Map(packet.entityCandidateGroups.flatMap((group) =>
+    group.candidateIds.map((candidateId) => [candidateId, group.resolution] as const)));
+  return packet.claims.map((claim): EvidenceChunk => {
+    const candidates = packet.entityCandidates.filter((candidate) =>
+      candidate.documentId === claim.documentId
+      && candidate.start >= claim.start
+      && candidate.end <= claim.end);
+    return {
+      id: claim.id,
+      projectId: "mcp-upload-packet",
+      sourceId: claim.documentId,
+      sourceVersionId: claim.assertionOwnerId,
+      title: documents.get(claim.documentId)?.name ?? claim.documentId,
+      locator: claim.locator,
+      text: claim.quote,
+      score: 1,
+      authority: "reference",
+      role: "reference",
+      lifecycle: "active",
+      claimKinds: [claimKindForGraph(claim.claimKind)],
+      claimKind: claimKindForGraph(claim.claimKind),
+      claimKey: claim.claimKey,
+      polarity: claim.polarity,
+      assertionScope: "source_assertion",
+      assertionOwnerId: claim.assertionOwnerId,
+      temporalAxis: claim.temporal?.axis ?? null,
+      validFromOrder: claim.temporal?.from ?? null,
+      validToOrder: claim.temporal?.to ?? null,
+      flags: ["compiled_atomic_span"],
+      referentKeys: candidates.map((candidate) => candidate.referentKey),
+      entityCandidates: candidates.map((candidate) => ({
+        id: candidate.id,
+        name: candidate.mention,
+        type: candidate.entityType,
+        aliases: [],
+        mention: candidate.mention,
+        referentKey: candidate.referentKey,
+        resolution: entityResolution(groupResolution.get(candidate.id)),
+      })),
+    };
+  });
+}
+
+function claimKindForGraph(value: string): ClaimKind {
+  const normalized = value.trim().toLowerCase();
+  if (["identity", "normative", "configured", "implemented", "tested", "observed", "causal", "historical"].includes(normalized)) {
+    return normalized as ClaimKind;
+  }
+  if (/identity|same-as|alias|relationship/.test(normalized)) return "identity";
+  if (/cause|depend|require|precondition|consequence|transition/.test(normalized)) return "causal";
+  if (/event|history|timeline/.test(normalized)) return "historical";
+  return "observed";
+}
+
+function entityResolution(value: "ambiguous" | "single_unresolved" | "source_scoped_explicit" | undefined) {
+  if (value === "ambiguous") return "ambiguous" as const;
+  if (value === "source_scoped_explicit") return "resolved" as const;
+  return "candidate" as const;
+}
+
+function publicContextError(error: unknown): string {
+  if (error instanceof McpContextError || error instanceof RepositoryProviderError || error instanceof TypeError) {
+    return error.message;
+  }
+  return "The bounded context preparation could not complete.";
+}
+
+function validateToolArguments(name: ReviewedToolName, input: JsonObject): string | null {
   const allowed = name === "continuity_answer_question"
     ? new Set(["projectId", "projectRevision", "question", "timeScope", "contextRefs"])
     : name === "continuity_trace_dependencies"

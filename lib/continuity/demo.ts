@@ -362,6 +362,11 @@ export class DemoReachabilityEvaluator implements ReachabilityEvaluator {
       }],
       diagnostics: proof.diagnostics,
       search: proof.search,
+      certificate: {
+        kind: "exhaustive_graph",
+        summary: `The server exhaustively searched the complete configured producer registry through ${graph.temporalAxis} ${request.targetPosition ?? 24}.`,
+        evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"],
+      },
     };
   }
 }
@@ -405,7 +410,7 @@ function classifyQuestion(value: string): DemoQuestionKind {
   if (/who is grandma|tell me about grandma|how many grandmothers?|multiple grandmothers?|grandma mean/.test(question)) {
     return "identity";
   }
-  if (/fund|afford|operation|surgery|reachable|reachability|completion path|trigger/.test(question)) {
+  if (/fund|afford|earn|accumulate|save|pay|operation|surgery|reachable|reachability|completion path|trigger|unlock|achieve|complete/.test(question)) {
     return "reachability";
   }
   return "general";

@@ -3,6 +3,8 @@
  * future authenticated workspace transports. Provider identifiers never
  * appear in these public resources or tool inputs.
  */
+export const CONTINUITY_MCP_CONTRACT_VERSION = "continuity.mcp.v1" as const;
+
 export const continuityResources = {
   revision: (projectId: string, revisionId: string) =>
     `continuity://projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}`,
@@ -96,6 +98,92 @@ export const continuityMcpTools = {
       ...projectRevisionInput,
       required: [...projectRevisionInput.required, "change"],
       properties: { ...projectRevisionInput.properties, change: { type: "string", minLength: 1, maxLength: 8_000 }, contextRefs: { type: "array", items: { type: "string", minLength: 1, maxLength: 240 }, maxItems: 20, uniqueItems: true } },
+    },
+  },
+  continuity_compile_material: {
+    description: "Use after the user uploads or pastes material. Verify ChatGPT-proposed exact spans and entity mentions, preserve ambiguity and source disagreement, and return a bounded question-scoped context receipt. The tool is stateless, keyless, and never promotes uploaded text to project canon.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["question", "documents"],
+      properties: {
+        question: { type: "string", minLength: 1, maxLength: 8_000 },
+        documents: {
+          type: "array",
+          minItems: 1,
+          maxItems: 8,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "text"],
+            properties: {
+              name: { type: "string", minLength: 1, maxLength: 240 },
+              text: { type: "string", maxLength: 20_000 },
+              authority: { type: "string", enum: ["reference", "proposal", "production_record"] },
+            },
+          },
+        },
+        claims: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["documentName", "quote", "claimKind", "subject", "predicate", "object", "polarity"],
+            properties: {
+              documentName: { type: "string", minLength: 1, maxLength: 240 },
+              quote: { type: "string", minLength: 1, maxLength: 8_192 },
+              occurrence: { type: "integer", minimum: 1 },
+              claimKind: { type: "string", minLength: 1, maxLength: 64, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" },
+              subject: { type: "string", minLength: 1, maxLength: 512 },
+              predicate: { type: "string", minLength: 1, maxLength: 512 },
+              object: { type: "string", minLength: 1, maxLength: 512 },
+              polarity: { type: "string", enum: ["positive", "negative"] },
+              temporal: {
+                type: ["object", "null"],
+                additionalProperties: false,
+                required: ["axis", "from"],
+                properties: {
+                  axis: { type: "string", minLength: 1, maxLength: 64, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" },
+                  from: { type: "integer", minimum: 0, maximum: 1_000_000_000 },
+                  to: { type: "integer", minimum: 0, maximum: 1_000_000_000 },
+                },
+              },
+            },
+          },
+        },
+        entityMentions: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["documentName", "quote", "mention"],
+            properties: {
+              documentName: { type: "string", minLength: 1, maxLength: 240 },
+              quote: { type: "string", minLength: 1, maxLength: 8_192 },
+              quoteOccurrence: { type: "integer", minimum: 1 },
+              mention: { type: "string", minLength: 1, maxLength: 512 },
+              mentionOccurrence: { type: "integer", minimum: 1 },
+              entityType: { type: "string", minLength: 1, maxLength: 512 },
+              explicitId: { type: "string", minLength: 1, maxLength: 512 },
+            },
+          },
+        },
+      },
+    },
+  },
+  continuity_inspect_public_repository: {
+    description: "Use when the user supplies a public GitHub repository and a canon question. Resolve one immutable commit and return a small safe set of question-relevant excerpts. For exact entity or causal verification, pass those excerpts to continuity_compile_material. Private repositories are not accessed.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["repository", "question"],
+      properties: {
+        repository: { type: "string", minLength: 3, maxLength: 240 },
+        question: { type: "string", minLength: 1, maxLength: 4_096 },
+        requestedRef: { type: "string", minLength: 1, maxLength: 200 },
+      },
     },
   },
 } as const;

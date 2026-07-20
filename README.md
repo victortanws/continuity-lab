@@ -25,6 +25,135 @@ npm run build
 
 This starter does not use `wrangler.jsonc`.
 
+## What this does, in plain English
+
+Continuity Lab helps a person or an AI answer questions about what a body of
+material actually establishes. It keeps five jobs separate:
+
+1. It receives a small, question-relevant packet of text or inspects a bounded
+   public GitHub snapshot.
+2. It verifies that proposed claims and character/entity mentions are exact
+   spans in that material. A model cannot create a citation merely by naming
+   one.
+3. It preserves source identity, time, authority, disagreement, and ambiguity
+   instead of flattening every sentence into one supposedly canonical answer.
+4. It uses the smallest safe route. A simple identity lookup skips graph work;
+   a causal, change, sequence, or multipart question may receive one bounded
+   in-memory graph pass.
+5. It returns evidence and coverage receipts so ChatGPT can answer clearly,
+   admit what could not be established, or propose a non-canonical repair.
+
+The reviewed VCS sample can therefore answer a question such as “Can the
+player earn $47,000 in the prototype?” as an implementation/reachability
+question, while the upload path can distinguish two people both called
+“Grandma” rather than silently merging them. A proposed new scene remains a
+proposal; none of these tools edits or promotes canon.
+
+## Try it out in the repo
+
+There are two useful entry paths. Both use the same HTTPS endpoint at `/mcp`.
+
+### Run and connect the MCP app
+
+1. Install and test the repository:
+
+   ```bash
+   npm install
+   npm run dev
+   npm run test:continuity
+   ```
+
+2. Deploy it to an HTTPS URL that ChatGPT can reach. `localhost` is useful for
+   development, but a remote ChatGPT client cannot call a loopback address.
+3. In ChatGPT, enable developer mode under **Settings → Security and login**,
+   add the deployed `https://<host>/mcp` endpoint under **Settings → Plugins**,
+   and select the app from **+ → More** in a chat. These names follow the
+   current [OpenAI Apps SDK connection guide](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt).
+   If a client also exposes an `@Continuity Lab` shortcut, it may be used, but
+   the app picker is the documented discovery path.
+4. Ask in that ChatGPT conversation. Useful starting questions include:
+
+   - “Can the player earn $47,000 in the current VCS prototype? Show the
+     blocking dependency and evidence.”
+   - “Who is Grandma? Keep separate people separate and cite each mention.”
+   - “What must happen before this event, and which prerequisite is missing?”
+   - “Do these two files disagree, or do they describe different points in
+     time?”
+   - “If I add this scene, what established facts, later payoffs, or production
+     assets could it affect?”
+
+The MCP advertises five read-only tools:
+
+- `continuity_answer_question`, `continuity_trace_dependencies`, and
+  `continuity_analyze_change` operate on the immutable reviewed VCS sample.
+- `continuity_compile_material` verifies exact claims and entity mentions from
+  text ChatGPT passes from an attachment, paste, or repository-aware host.
+- `continuity_inspect_public_repository` pins a public GitHub repository to one
+  commit and returns a small safe set of question-relevant excerpts. ChatGPT
+  can then pass those excerpts into `continuity_compile_material` for exact
+  entity, conflict, or causal inspection.
+
+### Ask about uploaded files or a repository
+
+In ChatGPT, attach one or more files and ask the question after selecting the
+app. ChatGPT reads the attachment, selects bounded relevant text, proposes
+exact quotations and entity mentions, and calls `continuity_compile_material`.
+The MCP does not automatically inherit the original attachment, the current
+Git checkout, or all files visible to a desktop app; the client must hand the
+text or excerpts to the tool explicitly.
+
+A repo-aware Codex or other compatible host can do the same thing with files it
+is authorized to read from the working tree. For an ordinary ChatGPT chat, give
+the app a public GitHub URL and a focused question. The current anonymous
+repository inspector does not access private repositories, branches outside
+the requested ref, or a developer's uncommitted local files.
+
+The MCP itself accepts text packets, not raw binary attachments. TXT, Markdown,
+JSON, YAML, XML, CSV/TSV, and extracted text from other formats work when the
+client can read them. PDF, DOCX, PPTX, XLSX, screenshots, and scans require the
+client or a future parser/vision adapter to extract relevant text first. If a
+page is unreadable, a quote cannot be located, or two candidates cannot be
+resolved confidently, the receipt says so; it does not invent an entity. The
+HTTP MCP request is capped at 32 KiB, so large manuscripts should be narrowed
+to question-relevant excerpts rather than copied wholesale.
+
+### Keys, subscriptions, and current limits
+
+The five MCP tools are currently stateless, read-only, and declared `noauth`.
+They make no OpenAI API call. This means a user's ChatGPT subscription can
+provide the conversational reasoning while the MCP performs deterministic
+verification; this path does not require you or the user to put an OpenAI API
+key into this application.
+
+That does not turn a ChatGPT subscription into API credit. The website's live
+GPT-5.6 button and the persisted arbitrary-workspace retrieval/query route still
+need a server-side `OPENAI_API_KEY`. ChatGPT also does not forward a custom API
+key to an MCP server, as explained in the [Apps SDK authentication
+guide](https://developers.openai.com/apps-sdk/build/auth). A future direct API
+or bring-your-own-key mode would therefore be a separate, encrypted credential
+and billing design—not a text field in a tool call. Private GitHub access will
+likewise require a scoped GitHub OAuth/App flow; it must not reuse an OpenAI
+credential.
+
+The public-repository tool is intentionally a preview: one immutable commit,
+at most eight provider calls, six files read, 20 KiB of returned excerpts, a
+20-second deadline, no automatic retry, and no corpus-wide absence claim. The
+upload compiler accepts source assertions, not project truth. Its graph is
+question-scoped and can traverse only verified claims and verified upstream
+semantic links; it is not yet a durable whole-corpus knowledge graph or an
+automatic natural-language causality theorem prover.
+
+### v3.2 to v3.3 compatibility
+
+The public transport remains MCP `2025-06-18`, and its stable data contract is
+`continuity.mcp.v1`. Authority-router version `3.3.0` is returned as separate
+metadata, so router changes do not rename tools or resource identities. The
+three v3.2 reviewed-sample tools keep their existing names, inputs, and output
+shape; v3.3 adds the two context tools. Tests exercise initialization, all five
+descriptors, the original VCS calls, exact upload verification, anonymous
+commit pinning, and the $47,000 regression. Clients should branch on advertised
+capabilities and `contractVersion`, not parse the router version from prose.
+
 ## Runtime shape
 
 - `app/api/continuity/query`: revision-pinned multi-lane retrieval,
@@ -35,7 +164,8 @@ This starter does not use `wrangler.jsonc`.
   server-validated narrative/reference/proposal document type
 - `app/api/continuity/repositories`: commit-pinned GitHub snapshot sync and status
 - `app/mcp`: stateless read-only MCP transport for the immutable reviewed VCS
-  sample; it does not expose arbitrary or private workspaces
+  sample, exact-span text packets, and bounded anonymous public-GitHub excerpts;
+  it does not expose arbitrary persisted or private workspaces
 - D1: project, source, snapshot, provider-binding, and analysis records
 - R2: uploaded bytes, repository blobs, manifests, and retrieval packets
 - OpenAI vector stores: replaceable retrieval projections, isolated per repository snapshot
@@ -75,7 +205,10 @@ insufficient evidence rather than a conflict unless an exact closed registry
 establishes the absence. Where a
 trusted adapter supplies server-owned dependency obligations, generated output
 cannot omit them, and a required open or blocked obligation prevents support.
-Arbitrary uploaded material does not acquire such a graph automatically.
+Arbitrary uploaded material does not acquire a complete causal graph
+automatically. The MCP may build one bounded question-scoped graph from
+verified atomic spans; explicit precondition/consequence edges still require a
+verified compiler or reviewed adapter record.
 
 ## Current capability boundary
 
@@ -83,7 +216,8 @@ Arbitrary uploaded material does not acquire such a graph automatically.
   sequentially; UTF-8 text and supported structured/document formats. PDF and
   Office are operator-only previews.
 - **Entity resolution:** exact-span, question-scoped candidates with cited
-  ambiguity. There is no durable corpus-wide entity/alias graph yet.
+  ambiguity, available through both the persisted query flow and the stateless
+  text-packet MCP. There is no durable corpus-wide entity/alias graph yet.
 - **Questions:** cited revision-pinned answers when retrieval is configured,
   with explicit conflict and coverage. General causal reachability remains
   unknown unless a trusted graph exists.
@@ -93,9 +227,10 @@ Arbitrary uploaded material does not acquire such a graph automatically.
   observations; no raw image/OCR adapter and no browser/API route yet.
 - **GitHub:** bounded commit-pinned snapshot sync; no webhook, incremental
   GitHub App flow, or live working-tree mount.
-- **MCP:** an executable stateless `/mcp` transport for three read-only analysis
-  tools over `vcs-demo-r1`. Authenticated arbitrary/private workspaces and
-  resource handlers are not implemented.
+- **MCP:** an executable stateless `/mcp` transport for five read-only tools:
+  three over `vcs-demo-r1`, one exact-span text-packet compiler, and one bounded
+  anonymous public-GitHub inspector. Authenticated persisted/private workspaces
+  and resource handlers are not implemented.
 
 ## Hosted environment values
 
@@ -164,9 +299,10 @@ upload a text description instead; OCR and region-grounded image ingestion are
 future adapters.
 
 See `docs/EVALUATION-POSTMORTEM.md` for the earlier output-contract confound,
-response-economy finding, and the fresh v3.1 reserve regression. v3.1 did not
-beat its baseline; v3.2 requires a new sealed reserve. Broad superiority, lower
-provider cost, and faster answers are not claimed.
+response-economy finding, and the fresh v3.1/v3.2 reserve regressions. Neither
+version beat its baseline. v3.3 therefore requires a newly sealed reserve;
+broad superiority, lower provider cost, and faster answers are not claimed
+until that evaluation is complete.
 
 See `docs/EVIDENCE-COMPILER.md` for the exact-quote, server-owned provenance
 boundary used by live workspaces and the remaining durable-entity/OCR limits.

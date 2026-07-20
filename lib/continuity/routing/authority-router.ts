@@ -15,6 +15,7 @@ import type {
   RetrievalPlan,
   TrustedCompletenessRegistry,
 } from "../contracts";
+import { AUTHORITY_ROUTER_VERSION } from "../contracts";
 import { classifyEvidence, DEFAULT_AUTHORITY_POLICY } from "../policy/default";
 import {
   boundaryCoversMaterialClaimKind,
@@ -196,9 +197,11 @@ export function routeEvidence(
     evidence: selected,
     route: {
       version: "continuity.route.v2",
+      routerVersion: AUTHORITY_ROUTER_VERSION,
       policyId: policy.id,
       policyVersion: policy.version,
       mode,
+      truthTarget: request.truthTarget ?? "project_truth",
       presentationDepth,
       budget,
       claimKinds,

@@ -1,10 +1,11 @@
-# Authority Router v2.0 → v3.2 evaluation postmortem
+# Authority Router v2.0 → v3.3 evaluation postmortem
 
-**Status:** the frozen v3.1 reserve has now been consumed. Baseline scored
-359.666667/400 and router v3.1 scored 344.666667/400, so the superiority gate
-failed by 15 points. v3.2 is an in-progress response to general calibration,
-connector-security, and inspection-planning faults; it must be frozen and
-tested on a new reserve before any improvement claim.
+**Status:** neither v3.1 nor v3.2 passed its preregistered external-superiority
+gate. The v3.2 fresh reserve scored baseline 266.5/400 and router
+222.277778/400. A structurally new four-domain v3.3 reserve was authored and
+hash-frozen before the v3.3 procedure was installed; it has not yet been
+consumed. No improvement claim is valid until that reserve and the saturated
+VCS regression both pass their stated gates.
 
 ## Executive conclusion
 
@@ -35,8 +36,60 @@ not beat the baseline on the preregistered external reserve.
   cases but lost materially on laboratory identity and closure calibration.
 
 The justified product claim is narrower: the generic distinctions transfer to
-unfamiliar repositories, and v3.1 now implements them as bounded server-owned
-controls. Comparative advantage remains promising rather than proven.
+unfamiliar repositories, and the candidate implements them as bounded
+server-owned controls. Comparative advantage remains unproven.
+
+## What v3.2 revealed
+
+The exact VCS regression remained strong but fell below the prior v3 result.
+Two graders scored the same response 96/100 and 92/100. Both found the central
+identity, reachability, causality, content, art, and implementation analysis
+strong. One deducted three points because the answer failed to preserve the
+explicit medical limitation that ClearRead is temporary assistance rather than
+a cure. The second also deducted four points for unsupported operational claims
+about Git state, a file absence, and a named decision authority. This was not
+mere grader noise: it exposed a real response-compilation fault. Required
+limiting conditions could disappear, while peripheral assertions escaped the
+citation boundary.
+
+The new four-domain reserve then scored baseline 266.5/400 versus router
+222.277778/400, a router delta of -44.222222. The router improved proposition
+status calibration but lost more on coverage closure, exact dependency IDs,
+and response economy:
+
+1. It treated packet-relative controlling records as unable to close their own
+   declared packet boundary unless a separate global authority grant existed.
+   That confused “what this complete packet establishes” with “what is true in
+   the outside world.”
+2. It returned explanatory dependency prose instead of the server-owned IDs
+   required by the visible contract.
+3. Whole-chunk prompt-injection quarantine discarded nearby useful evidence
+   even where a smaller offending span could have been isolated safely.
+4. It sometimes produced invalid line locators and volunteered unsupported
+   operational details.
+5. It spent roughly twice the input tokens and materially more wall time than
+   the baseline, including on direct lookups that did not need a global audit.
+
+The v3.3 response is therefore architectural rather than benchmark-specific:
+
+- name the truth target (`packet_assertion`, `project_truth`, or
+  `observed_world`) before deciding authority;
+- keep proposition status, source authority, and evidence coverage as separate
+  axes;
+- compile caller-visible answer obligations before drafting, then lint every
+  visible factual clause after drafting;
+- preserve server-owned dependency IDs and accept only typed reachability
+  certificates;
+- quarantine the smallest safely isolated instruction span;
+- use a shallow lookup route by default and invoke bounded graph work only for
+  causal, contradiction, impact, and change questions; and
+- validate exact source locators on the server.
+
+These changes are intentionally framed in terms of packets, claims, evidence,
+and transitions. They contain no VCS, manhua, or reserve-answer nouns. The new
+reserve covers archival rights, aviation release, construction occupancy, and
+satellite commands so that the next score cannot be selected on the projects
+that motivated the fixes.
 
 ## What each experiment actually tested
 
@@ -49,6 +102,9 @@ controls. Comparative advantage remains promising rather than proven.
 | v3 format-only sensitivity | declared aliases applied after unsealing | 287.25/300 versus 277.25/300 | diagnostic: one substantive outcome correction |
 | v3.1 implementation suite | actual deterministic routing/validation code | passing | validates invariants, not model-quality lift |
 | v3.1 fresh reserve | four unrelated domains, three depths, eight paired strict responses | 344.67 router versus 359.67 baseline | failed superiority gate; v3.2 required |
+| VCS v3.2 regression | exact frozen VCS question, one response, two graders | 96/100 and 92/100 | strong but below v3; limiting-condition omission and unsupported peripheral claims |
+| v3.2 fresh reserve | four unrelated domains, three depths, eight paired strict responses | 222.28 router versus 266.50 baseline | failed superiority; authority/closure conflation and response cost dominated status gains |
+| v3.3 fresh reserve | four new unrelated domains, frozen before procedure installation | pending | only valid external selection gate for v3.3 |
 
 The repository-agent A/B runs tested whether a procedure changed model
 behavior. They did not execute the deployed API, D1/R2 persistence, OpenAI
@@ -175,9 +231,13 @@ The current candidate implements:
 - bounded commit-pinned GitHub snapshot ingestion;
 - question-scoped exact-span claim/entity candidates and cited questions when
   OpenAI retrieval is configured;
+- stateless MCP text-packet verification and bounded anonymous public-GitHub
+  excerpts without a server-side OpenAI call;
 - multi-lane authority/lifecycle/claim-use routing;
 - explicit coverage closure, contradiction handling, universal-negative repair,
   and server-owned dependency obligations;
+- a bounded in-memory question graph over verified atomic records, with shallow
+  lookup bypass and explicit traversal/corpus coverage receipts;
 - deterministic transition/reachability and production-audit cores when a
   trusted or curated graph/observation set is supplied; and
 - canon-safe proposals that remain provisional.
@@ -207,14 +267,17 @@ or general autonomous causality.
 
 ## Next validation gate
 
-Freeze v3.2 only after the connector metadata boundary, exact live receipt,
-tenancy trust, MCP error contract, correlated inspection signals, and mandatory
-feasibility planner all pass deterministic tests. The exact VCS question then
-serves as a saturated regression—not a selection set.
+The v3.3 reserve was authored and cryptographically frozen before the v3.3
+implementation was inspected against its hidden prompts or gold. It uses
+archival rights, aviation release, construction occupancy, and satellite
+command records rather than another story-shaped selection set. The prior v3.2
+reserve is now regression evidence only, and the exact VCS question is a
+saturated regression rather than a selection target.
 
-A new sealed reserve must use structurally different domains and preserve the
-same evidence across arms. Fast, scoped, and causal cases retain separate word
-and citation ceilings, strict visible output schema, server-owned receipts, and
-blind gold. The v3.2 claim passes only if it improves the new paired external
-score without losing VCS correctness, schema conformance, source-instruction
-resistance, or response economy.
+After the candidate, procedure, and deterministic tests are frozen, run each
+v3.3 arm once with the same evidence, model, sampling policy, visible schema,
+word/citation ceilings, and no retry. Preserve raw responses, per-dimension
+grader rationales, receipts, and failure artifacts. v3.3 passes only if it
+improves the paired external score without losing VCS correctness, schema
+conformance, source-instruction resistance, or response economy. Until those
+results exist, this document makes no superiority claim.

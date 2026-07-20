@@ -102,10 +102,21 @@ to this evidence-routing product rather than copied as application canon.
   arbitrary source text is not treated as a complete graph.
 - Every query pins immutable revision membership; later uploads cannot enter
   that revision's evidence result.
-- The stateless `/mcp` transport is pinned to the immutable reviewed VCS sample,
-  advertises only read-only/idempotent tools, enforces a 32 KiB JSON boundary,
-  and does not call OpenAI, synchronize GitHub, or mutate project state. It
-  rejects arbitrary workspaces and revisions instead of silently widening scope.
+- The stateless `/mcp` transport advertises only read-only/idempotent tools,
+  enforces a 32 KiB JSON boundary, does not call OpenAI, and never mutates or
+  promotes project state. Its three reviewed-VCS tools remain pinned to the
+  immutable sample and reject arbitrary project/revision labels.
+- Its text-packet compiler accepts no credential, verifies caller-proposed
+  quotes and entity mentions against exact submitted spans, assigns
+  deterministic source-scoped IDs, separates same-name candidates, preserves
+  same-frame disagreement, quarantines instruction-like source text, and keeps
+  corpus coverage open. Rejected proposals cannot enter its question graph.
+- Its anonymous public-GitHub inspector accepts only canonical GitHub repository
+  identifiers, sends no authorization header, resolves a full commit before
+  reading, reapplies safe-path and secret filters, and is capped per request at
+  20 seconds, eight provider calls, six files, 384 KiB read, and 20 KiB returned.
+  It has a two-call per-isolate concurrency ceiling and no retry. These are
+  resource controls, not durable identity or distributed rate limiting.
 - D1 statements are parameterized. React renders model/source strings as text,
   not raw HTML. Production source maps are disabled; CSP, anti-framing, HSTS,
   MIME, referrer, permissions, and opener headers are configured.
@@ -117,6 +128,9 @@ Sites access remains explicitly restricted, the OpenAI key is a server-side
 secret, the exact production origin is the only trusted ingress, and uploaded
 fixtures/repositories are pre-reviewed for sensitivity. The deterministic VCS
 sample and its read-only MCP transport can be shown without a provider key.
+The stateless text compiler is likewise keyless. The anonymous public-repository
+preview is keyless too, but should remain owner-demo or otherwise sit behind
+durable service-level abuse controls.
 
 This is not yet a broad public multi-tenant product. A production release must
 close the items below rather than interpreting a successful private demo as a
@@ -135,11 +149,12 @@ general security guarantee.
   extraction; the operator-only preview is not a promise that binary documents
   are credential-safe.
 - Add organization membership/roles, signed authentication for any deployment
-  outside trusted Sites ingress, and a bearer-authenticated private-workspace
+  outside trusted Sites ingress, durable distributed request/egress quotas for
+  the anonymous repository preview, and an OAuth-authenticated private-workspace
   MCP path with per-project authorization.
 - Add private MCP resource handlers, consented mutation boundaries, quotas, and
-  audit logging. The reviewed-sample transport is not a private-workspace
-  connector.
+  audit logging. Stateless upload/repository evidence preparation is not a
+  private persisted-workspace connector.
 - Move repository synchronization and large-file extraction to durable jobs.
   The current bounded sync is synchronous; it is not an async-job system and
   does not resume a timed-out traversal.
