@@ -1,21 +1,15 @@
 import type {
-  ContinuityAnswer, ContinuityReasoner, EvidenceChunk, EvidenceRetriever,
-  QueryRequest, QueryResult,
+  AnalysisRoute, AuthorityPolicy, ContinuityAnswer, ContinuityReasoner,
+  EvidenceChunk, EvidenceRetriever, QueryRequest, QueryResult,
 } from "./contracts";
-
-const AUTHORITY_WEIGHT = {
-  immutable: 6,
-  retcon: 5,
-  canon: 4,
-  production: 3,
-  proposal: 2,
-  reference: 1,
-} as const;
+import { DEFAULT_AUTHORITY_POLICY } from "./policy/default";
+import { authorityWeight, routeEvidence } from "./routing/authority-router";
 
 export class ContinuityEngine {
   constructor(
     private readonly retriever: EvidenceRetriever,
     private readonly reasoner: ContinuityReasoner,
+    private readonly authorityPolicy: AuthorityPolicy = DEFAULT_AUTHORITY_POLICY,
   ) {}
 
   async query(request: QueryRequest): Promise<QueryResult> {
@@ -23,16 +17,28 @@ export class ContinuityEngine {
     if (!question) throw new ContinuityInputError("question is required");
     if (!request.projectId.trim()) throw new ContinuityInputError("projectId is required");
 
-    const rawEvidence = await this.retriever.retrieve({ ...request, question });
-    const evidence = prepareEvidence(rawEvidence, request.projectId, request.storyPosition);
-    const proposed = await this.reasoner.answer({ ...request, question }, evidence);
-    const validation = validateAnswer(proposed, evidence);
+    const normalizedRequest = { ...request, question };
+    const rawEvidence = await this.retriever.retrieve(normalizedRequest);
+    const routing = routeEvidence(rawEvidence, normalizedRequest, this.authorityPolicy);
+    routing.evidence = routing.evidence.map((chunk) => ({
+      ...chunk,
+      flags: detectEvidenceFlags(chunk.text, chunk.flags),
+    }));
+    const proposed = await this.reasoner.answer(normalizedRequest, routing.evidence, routing.route);
+    const validation = validateAnswer(
+      proposed,
+      routing.evidence,
+      normalizedRequest,
+      routing.route,
+      this.authorityPolicy,
+    );
 
     return {
       mode: this.reasoner.mode,
       model: this.reasoner.model,
       answer: validation.answer,
-      retrievedEvidence: evidence,
+      retrievedEvidence: routing.evidence,
+      routing: routing.route,
       validation: { repaired: validation.issues.length > 0, issues: validation.issues },
     };
   }
@@ -49,50 +55,40 @@ export class CompositeRetriever implements EvidenceRetriever {
 
 export class ContinuityInputError extends Error {}
 
-export function prepareEvidence(chunks: EvidenceChunk[], projectId: string, storyPosition?: number): EvidenceChunk[] {
-  const seen = new Set<string>();
-  const sameProject = chunks.filter((chunk) => chunk.projectId === projectId);
-  const deduplicated = sameProject.filter((chunk) => {
-    if (seen.has(chunk.id)) return false;
-    seen.add(chunk.id);
-    return true;
-  });
-
-  const temporallyValid = storyPosition === undefined
-    ? deduplicated
-    : deduplicated.filter((chunk) =>
-      (chunk.validFromOrder == null || chunk.validFromOrder <= storyPosition)
-      && (chunk.validToOrder == null || storyPosition <= chunk.validToOrder));
-
-  const superseded = new Set(
-    temporallyValid
-      .filter((chunk) => chunk.authority === "retcon" && chunk.supersedesSourceId)
-      .map((chunk) => chunk.supersedesSourceId as string),
-  );
-
-  return temporallyValid
-    .filter((chunk) => !superseded.has(chunk.sourceId))
-    .map((chunk) => ({ ...chunk, flags: detectEvidenceFlags(chunk.text, chunk.flags) }))
-    .sort((a, b) => {
-      const authority = AUTHORITY_WEIGHT[b.authority] - AUTHORITY_WEIGHT[a.authority];
-      return authority || b.score - a.score || a.id.localeCompare(b.id);
-    })
-    .slice(0, 16);
+export function prepareEvidence(
+  chunks: EvidenceChunk[],
+  projectId: string,
+  storyPosition?: number,
+  policy: AuthorityPolicy = DEFAULT_AUTHORITY_POLICY,
+): EvidenceChunk[] {
+  return routeEvidence(chunks, {
+    projectId,
+    question: "Prepare an evidence projection.",
+    storyPosition,
+  }, policy).evidence.map((chunk) => ({
+    ...chunk,
+    flags: detectEvidenceFlags(chunk.text, chunk.flags),
+  }));
 }
 
 export function validateAnswer(
   proposed: ContinuityAnswer,
   evidence: EvidenceChunk[],
+  request?: QueryRequest,
+  route?: AnalysisRoute,
+  policy: AuthorityPolicy = DEFAULT_AUTHORITY_POLICY,
 ): { answer: ContinuityAnswer; issues: string[] } {
   const issues: string[] = [];
   const byId = new Map(evidence.map((item) => [item.id, item]));
-  const validEvidence = proposed.evidence.filter((reference) => {
+  const validEvidence = proposed.evidence.flatMap((reference) => {
     const chunk = byId.get(reference.evidenceId);
     if (!chunk || chunk.sourceId !== reference.sourceId) {
       issues.push(`Removed unknown or mismatched citation: ${reference.evidenceId}`);
-      return false;
+      return [];
     }
-    return true;
+    // The model selects an evidence ID and explains its use. The server owns
+    // the source and locator so a generated answer cannot forge a citation.
+    return [{ ...reference, sourceId: chunk.sourceId, locator: chunk.locator }];
   });
 
   let verdict = proposed.verdict;
@@ -109,8 +105,10 @@ export function validateAnswer(
     claimGroups.set(chunk.claimKey, group);
   }
   const contradictoryClaims = [...claimGroups.entries()].flatMap(([claimKey, chunks]) => {
-    const highestWeight = Math.max(...chunks.map((chunk) => AUTHORITY_WEIGHT[chunk.authority]));
-    const effective = chunks.filter((chunk) => AUTHORITY_WEIGHT[chunk.authority] === highestWeight);
+    const highestWeight = Math.max(...chunks.map((chunk) =>
+      chunk.authorityRank ?? authorityWeight(chunk.authority, policy)));
+    const effective = chunks.filter((chunk) =>
+      (chunk.authorityRank ?? authorityWeight(chunk.authority, policy)) === highestWeight);
     return new Set(effective.map((chunk) => chunk.polarity)).size > 1 ? [[claimKey, effective] as const] : [];
   });
   if (contradictoryClaims.length && verdict !== "PROPOSAL") {
@@ -148,9 +146,15 @@ export function validateAnswer(
 
   let reachability = proposed.reachability;
   if (verdict === "UNREACHABLE") {
+    const hasClosedWorldEvidence = citedChunks.some((chunk) => chunk.closedWorld);
+    const trustedCoverage = route
+      ? route.coverage.trustedComplete
+      : Boolean(request?.coverage?.complete && hasClosedWorldEvidence);
     const scoped = reachability.status === "unreachable_within_scope"
       && reachability.completenessScope.trim().length > 0
-      && reachability.blockers.length > 0;
+      && reachability.blockers.length > 0
+      && trustedCoverage
+      && hasClosedWorldEvidence;
     if (!scoped) {
       verdict = "INSUFFICIENT_EVIDENCE";
       truthStatus = "unknown";
@@ -160,7 +164,7 @@ export function validateAnswer(
         status: "unknown",
         blockers: reachability.blockers.length ? reachability.blockers : ["The available causal coverage is not complete enough to prove unreachability."],
       };
-      issues.push("Downgraded UNREACHABLE because the answer did not establish a complete causal scope and blocker");
+      issues.push("Downgraded UNREACHABLE because trusted closed-world coverage and a concrete blocker were not both established");
     }
   }
 
@@ -181,6 +185,12 @@ export function validateAnswer(
     return { ...edge, evidenceIds: validIds };
   });
 
+  const validatedConflicts = conflicts.map((conflict) => {
+    const validIds = conflict.evidenceIds.filter((id) => byId.has(id));
+    if (validIds.length !== conflict.evidenceIds.length) issues.push(`Removed unknown conflict evidence for ${conflict.type}`);
+    return { ...conflict, evidenceIds: validIds };
+  });
+
   const proposal = proposed.proposal && proposed.proposal.assumptions.length === 0
     ? { ...proposed.proposal, assumptions: ["No supporting assumption was supplied; treat this route as provisional."] }
     : proposed.proposal;
@@ -197,7 +207,7 @@ export function validateAnswer(
       reachability,
       confidence,
       evidence: validEvidence,
-      conflicts,
+      conflicts: validatedConflicts,
       dependencies,
       proposal,
       caveats: [...proposed.caveats, ...issues],

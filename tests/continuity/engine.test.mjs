@@ -139,6 +139,21 @@ test("fabricated and source-mismatched citations are removed and downgrade suppo
   assert.match(result.issues.join("\n"), /no valid citation/i);
 });
 
+test("validated citations use the server-owned locator instead of a generated locator", () => {
+  const chunk = evidence({ locator: "github:abc/src/story.ts#L10-L22" });
+  const proposed = answer({
+    verdict: "SUPPORTED",
+    truthStatus: "supported",
+    answer: "The payment is required.",
+    confidence: "high",
+    evidence: [citation(chunk, { locator: "forged/location#L1-L999" })],
+  });
+
+  const result = validateAnswer(proposed, [chunk]);
+
+  assert.equal(result.answer.evidence[0].locator, "github:abc/src/story.ts#L10-L22");
+});
+
 test("equal-authority contradiction is exposed even when the reasoner hides one side", () => {
   const positive = evidence({
     id: "EV-YES",
@@ -304,7 +319,7 @@ test("UNREACHABLE requires both a complete scope and a concrete blocker", () => 
   assert.equal(result.answer.verdict, "INSUFFICIENT_EVIDENCE");
   assert.equal(result.answer.reachability.status, "unknown");
   assert.ok(result.answer.reachability.blockers.length > 0);
-  assert.match(result.issues.join("\n"), /complete causal scope and blocker/i);
+  assert.match(result.issues.join("\n"), /closed-world coverage and a concrete blocker/i);
 });
 
 test("reachability reports an unmet producer prerequisite", () => {

@@ -404,7 +404,7 @@ export class ContinuityRepository {
     indexStatus: SourceIndexStatus;
     indexError?: string | null;
   }): Promise<string> {
-    const revision = `revision_${crypto.randomUUID()}`;
+    const revision = `repository:${input.snapshotId}`;
     await this.db.batch([
       this.db.prepare(
         `UPDATE repository_snapshots SET
@@ -449,11 +449,18 @@ export class ContinuityRepository {
     ).bind(snapshotId, status, error).run();
   }
 
-  async activateRepositorySnapshot(connectionId: string, snapshotId: string): Promise<void> {
-    await this.db.prepare(
-      `UPDATE repository_connections SET active_snapshot_id = ?2, sync_status = 'ready',
-         last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`,
-    ).bind(connectionId, snapshotId).run();
+  async activateRepositorySnapshot(connectionId: string, snapshotId: string, projectId: string): Promise<string> {
+    const revision = `repository:${snapshotId}`;
+    await this.db.batch([
+      this.db.prepare(
+        `UPDATE repository_connections SET active_snapshot_id = ?2, sync_status = 'ready',
+           last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`,
+      ).bind(connectionId, snapshotId),
+      this.db.prepare(
+        `UPDATE projects SET active_revision = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`,
+      ).bind(projectId, revision),
+    ]);
+    return revision;
   }
 
   async failRepositorySnapshot(input: {

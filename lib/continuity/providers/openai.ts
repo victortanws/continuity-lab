@@ -1,11 +1,15 @@
 import {
   CONTINUITY_ANSWER_SCHEMA,
   CONTINUITY_ANSWER_VERSION,
+  type AnalysisRoute,
   type CanonAuthority,
+  type ClaimKind,
   type ContinuityAnswer,
   type ContinuityReasoner,
   type EvidenceChunk,
+  type EvidenceLifecycle,
   type EvidenceRetriever,
+  type EvidenceRole,
   type QueryRequest,
 } from "../contracts";
 import { buildContinuityInput, buildContinuityInstructions } from "../prompt";
@@ -84,7 +88,7 @@ export class OpenAIReasoner implements ContinuityReasoner {
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
-  async answer(request: QueryRequest, evidence: EvidenceChunk[]): Promise<ContinuityAnswer> {
+  async answer(request: QueryRequest, evidence: EvidenceChunk[], route?: AnalysisRoute): Promise<ContinuityAnswer> {
     const evidenceSnapshot = snapshotId(evidence);
     const response = await this.fetchImpl(`${OPENAI_API_BASE}/responses`, {
       method: "POST",
@@ -93,7 +97,7 @@ export class OpenAIReasoner implements ContinuityReasoner {
         model: CONTINUITY_MODEL,
         reasoning: { effort: "medium" },
         instructions: buildContinuityInstructions(),
-        input: `${buildContinuityInput(request, evidence)}\n<evidence_snapshot>${evidenceSnapshot}</evidence_snapshot>`,
+        input: `${buildContinuityInput(request, evidence, route)}\n<evidence_snapshot>${evidenceSnapshot}</evidence_snapshot>`,
         text: {
           verbosity: "medium",
           format: {
@@ -172,9 +176,13 @@ function mapSearchResult(value: unknown, requestedProjectId: string): EvidenceCh
   const polarity = polarityValue === "positive" || polarityValue === "negative" ? polarityValue : null;
 
   return content.map((text, index) => {
-    const repositoryPath = repositoryPathFromChunk(text);
+    const repositoryMetadata = /^github:[a-f\d]{40}$/i.test(baseLocator)
+      ? repositoryMetadataFromChunk(text)
+      : null;
+    const repositoryPath = repositoryMetadata?.path ?? null;
+    const lineSuffix = repositoryMetadata ? `#L${repositoryMetadata.startLine}-L${repositoryMetadata.endLine}` : "";
     const locator = repositoryPath
-      ? `${baseLocator}/${repositoryPath}`
+      ? `${baseLocator}/${repositoryPath}${lineSuffix}`
       : content.length === 1 ? baseLocator : `${baseLocator} / match ${index + 1}`;
     const textHash = stableHash(`${sourceVersionId}\u0000${baseLocator}\u0000${text}`);
     const id = explicitFragmentId
@@ -189,29 +197,71 @@ function mapSearchResult(value: unknown, requestedProjectId: string): EvidenceCh
       locator,
       text,
       score,
-      authority,
+      authority: repositoryMetadata?.authority ?? authority,
+      ...(repositoryMetadata?.role ? { role: repositoryMetadata.role } : {}),
+      ...(repositoryMetadata?.lifecycle ? { lifecycle: repositoryMetadata.lifecycle } : {}),
+      ...(repositoryMetadata?.claimKinds?.length ? { claimKinds: repositoryMetadata.claimKinds } : {}),
       validFrom,
       validTo,
       supersedesSourceId,
-      closedWorld,
+      closedWorld: repositoryMetadata?.closedWorld ?? closedWorld,
       claimKey,
       polarity,
     };
   });
 }
 
-function repositoryPathFromChunk(text: string): string | null {
-  const marker = text.match(/<!--\s*CONTINUITY_FILE\s+path=("(?:[^"\\]|\\.)*")\s+/);
-  if (marker?.[1]) {
+type RepositoryChunkMetadata = {
+  path: string;
+  authority: CanonAuthority;
+  closedWorld: boolean;
+  startLine: number;
+  endLine: number;
+  role: EvidenceRole | null;
+  lifecycle: EvidenceLifecycle | null;
+  claimKinds: ClaimKind[];
+};
+
+function repositoryMetadataFromChunk(text: string): RepositoryChunkMetadata | null {
+  const marker = text.match(/<!--\s*CONTINUITY_FILE\s+([^>]+?)\s*-->/)?.[1] ?? "";
+  const encodedPath = marker.match(/\bpath=("(?:[^"\\]|\\.)*")/)?.[1];
+  if (encodedPath) {
     try {
-      const path = JSON.parse(marker[1]) as unknown;
-      if (typeof path === "string" && path.length <= 512 && !path.includes("..")) return path;
+      const path = JSON.parse(encodedPath) as unknown;
+      const startLine = Number(marker.match(/\blines=(\d+)-(\d+)/)?.[1]);
+      const endLine = Number(marker.match(/\blines=(\d+)-(\d+)/)?.[2]);
+      const authority = parseAuthority(marker.match(/\bauthority=([a-z_]+)/)?.[1] ?? "reference");
+      const role = parseRole(marker.match(/\brole=([a-z_]+)/)?.[1] ?? "");
+      const lifecycle = parseLifecycle(marker.match(/\blifecycle=([a-z_]+)/)?.[1] ?? "");
+      const claimKinds = parseClaimKinds(marker.match(/\bclaim_kinds=([a-z_,]*)/)?.[1] ?? "");
+      const closedWorld = marker.match(/\bclosed_world=(true|false)/)?.[1] === "true";
+      if (
+        typeof path === "string" && path.length <= 512 && !path.includes("..")
+        && Number.isSafeInteger(startLine) && Number.isSafeInteger(endLine)
+        && startLine > 0 && endLine >= startLine
+      ) {
+        return {
+          path,
+          authority,
+          closedWorld,
+          startLine,
+          endLine,
+          role,
+          lifecycle,
+          claimKinds,
+        };
+      }
     } catch {
       // Fall through to the human-readable file heading.
     }
   }
-  const heading = text.match(/^## FILE:\s+([^\n·]+?)(?:\s+·\s+segment\s+\d+\/\d+)?\s*$/m);
-  return heading?.[1]?.trim().slice(0, 512) || null;
+  const heading = text.match(/^## FILE:\s+([^\n·]+?)\s+·\s+lines\s+(\d+)-(\d+)/m);
+  const path = heading?.[1]?.trim().slice(0, 512);
+  const startLine = Number(heading?.[2]);
+  const endLine = Number(heading?.[3]);
+  return path && !path.includes("..") && Number.isSafeInteger(startLine) && Number.isSafeInteger(endLine)
+    ? { path, authority: "reference", closedWorld: false, startLine, endLine, role: null, lifecycle: null, claimKinds: [] }
+    : null;
 }
 
 function extractOutputText(payload: unknown): string | null {
@@ -293,6 +343,26 @@ function parseAuthority(value: string): CanonAuthority {
   return ["immutable", "canon", "retcon", "production", "proposal", "reference"].includes(value)
     ? value as CanonAuthority
     : "reference";
+}
+
+function parseRole(value: string): EvidenceRole | null {
+  const roles: EvidenceRole[] = [
+    "intent", "decision", "configuration", "implementation", "test", "observation",
+    "proposal", "archive", "asset", "reference", "evaluation",
+  ];
+  return roles.includes(value as EvidenceRole) ? value as EvidenceRole : null;
+}
+
+function parseLifecycle(value: string): EvidenceLifecycle | null {
+  const lifecycles: EvidenceLifecycle[] = ["active", "proposed", "superseded", "historical", "unknown"];
+  return lifecycles.includes(value as EvidenceLifecycle) ? value as EvidenceLifecycle : null;
+}
+
+function parseClaimKinds(value: string): ClaimKind[] {
+  const allowed = new Set<ClaimKind>([
+    "identity", "normative", "configured", "implemented", "tested", "observed", "causal", "historical",
+  ]);
+  return value.split(",").map((item) => item.trim()).filter((item): item is ClaimKind => allowed.has(item as ClaimKind));
 }
 
 function requireConfiguration(value: string, label: string): void {

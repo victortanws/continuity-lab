@@ -12,16 +12,16 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const base = new URL(`${protocol}://${host}`);
-  const title = "Continuity Lab — Ask whether a story can become true";
-  const description = "Trace promises through story, economy, code, and art—then see what must change to make them reachable.";
-  const socialImage = new URL("/og.png", base).toString();
+  const title = "Continuity Lab — Make every story change explain itself";
+  const description = "Upload a story or connect a repository. Continuity Lab uses GPT-5.6 to trace entities, rules, and causal dependencies back to cited evidence.";
+  const socialImage = new URL("/art/vcs-continuity-hero-v2.png", base).toString();
 
   return {
     metadataBase: base,
     title,
     description,
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
-    openGraph: { title, description, type: "website", url: base, images: [{ url: socialImage, width: 1680, height: 945, alt: "Continuity Lab — Can the story become true?" }] },
+    openGraph: { title, description, type: "website", url: base, images: [{ url: socialImage, width: 1536, height: 1024, alt: "Continuity Lab — Can the story become true?" }] },
     twitter: { card: "summary_large_image", title, description, images: [socialImage] },
   };
 }

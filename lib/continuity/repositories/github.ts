@@ -1,4 +1,7 @@
-export const REPOSITORY_POLICY_VERSION = "continuity.repository-policy.v1" as const;
+import type { EvidenceRole } from "../contracts";
+import { classifyRepositoryPath } from "../policy/default";
+
+export const REPOSITORY_POLICY_VERSION = "continuity.repository-policy.v2" as const;
 
 export type RepositoryLimits = {
   maxTreeEntries: number;
@@ -57,6 +60,7 @@ export type RepositorySkipReason =
   | "excluded_path"
   | "sensitive_path"
   | "unsupported_type"
+  | "evaluation_excluded"
   | "missing_size"
   | "empty"
   | "file_too_large"
@@ -222,15 +226,46 @@ export function isSafeRepositoryPath(path: string): boolean {
   return pathPolicy(path).safe;
 }
 
-function priority(entry: RepositoryTreeEntry): number {
-  const lower = entry.path.toLowerCase();
-  const basename = lower.split("/").at(-1) ?? "";
-  if (basename === "agents.md") return 0;
-  if (basename === "readme.md" || basename === "readme") return 1;
-  if (/^(canon|story|manifests)\//.test(lower)) return 2;
-  if (/^(docs|\.codex|production)\//.test(lower)) return 3;
-  if (/\.(?:md|markdown|txt|yaml|yml|json|toml)$/.test(lower)) return 4;
-  return 5;
+/**
+ * Repository text is embedded inside a server-authored packet. Neutralize the
+ * packet's reserved control syntax in untrusted file bodies so a repository
+ * cannot mint its own authority, closed-world flag, path, or line locator.
+ * Original bytes remain unchanged in R2; this only affects the retrieval copy.
+ */
+export function escapeRepositoryPacketControlSyntax(text: string): string {
+  return text
+    .replace(/CONTINUITY_FILE/gi, (token) => `${token.slice(0, 10)}\u2060${token.slice(10)}`)
+    .replace(/^## FILE:/gm, "## SOURCE FILE:");
+}
+
+function balancedCandidateOrder(entries: RepositoryTreeEntry[]): RepositoryTreeEntry[] {
+  const roleOrder: EvidenceRole[] = [
+    "intent", "decision", "configuration", "implementation", "test", "observation",
+    "asset", "proposal", "archive", "reference",
+  ];
+  const buckets = new Map(roleOrder.map((role) => [role, [] as RepositoryTreeEntry[]]));
+  const policyFiles: RepositoryTreeEntry[] = [];
+  for (const entry of [...entries].sort((a, b) => a.path.localeCompare(b.path))) {
+    const lower = entry.path.toLowerCase();
+    if (lower === "continuity.config.json" || lower === ".continuity/config.json") {
+      policyFiles.push(entry);
+      continue;
+    }
+    const role = classifyRepositoryPath(entry.path).role;
+    (buckets.get(role) ?? buckets.get("reference")!).push(entry);
+  }
+  const ordered = [...policyFiles];
+  let remaining = true;
+  while (remaining) {
+    remaining = false;
+    for (const role of roleOrder) {
+      const next = buckets.get(role)?.shift();
+      if (!next) continue;
+      ordered.push(next);
+      remaining = true;
+    }
+  }
+  return ordered;
 }
 
 function positiveInteger(value: number, fallback: number): number {
@@ -270,6 +305,10 @@ export function selectRepositoryEntries(
       skipped.push({ path: entry.path, reason: policy.reason ?? "unsafe_path" });
       continue;
     }
+    if (classifyRepositoryPath(entry.path).role === "evaluation") {
+      skipped.push({ path: entry.path, reason: "evaluation_excluded" });
+      continue;
+    }
     if (entry.size === null || !Number.isSafeInteger(entry.size) || entry.size < 0) {
       skipped.push({ path: entry.path, reason: "missing_size" });
       continue;
@@ -285,10 +324,10 @@ export function selectRepositoryEntries(
     candidates.push(entry);
   }
 
-  candidates.sort((a, b) => priority(a) - priority(b) || a.path.localeCompare(b.path));
+  const orderedCandidates = balancedCandidateOrder(candidates);
   const selected: RepositoryTreeEntry[] = [];
   let selectedBytes = 0;
-  for (const entry of candidates) {
+  for (const entry of orderedCandidates) {
     if (selected.length >= limits.maxFiles) {
       skipped.push({ path: entry.path, reason: "file_limit" });
       continue;

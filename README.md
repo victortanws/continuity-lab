@@ -36,8 +36,10 @@ This starter does not use `wrangler.jsonc`.
 
 - `OPENAI_API_KEY` (secret): enables GPT-5.6 Sol and OpenAI retrieval. Without it,
   uploads and repository snapshots remain stored but are reported as not searchable.
-- `GITHUB_TOKEN` (secret, optional): read-only Contents access for private repositories
-  and better GitHub API limits. Public repositories work without it.
+- `GITHUB_TOKEN` (secret, strongly recommended for the demo): read-only Contents
+  access for private repositories and reliable GitHub API capacity. Tiny public
+  repositories can work without it, but unauthenticated GitHub limits are too
+  small for a dependable full-project demonstration.
 - `REPOSITORY_SYNC_ALLOWED_EMAILS`: comma-separated ChatGPT account emails allowed
   to create repository snapshots. Production synchronization fails closed when this
   value is absent; localhost remains available for development.

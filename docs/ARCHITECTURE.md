@@ -4,7 +4,13 @@ Continuity Lab is an evidence-first consequence engine. It can answer questions 
 
 ## The invariant
 
-Original bytes are immutable evidence. Every answer is pinned to a project revision and cites stable evidence locators. Search results, extracted graphs, model output, and repair ideas are derived projections. A proposal becomes canon only through a separate approval operation.
+Original bytes are immutable evidence. Every answer is pinned to a project revision and cites source-owned locators. Search results, dependency slices, model output, and repair ideas are derived projections. The MVP never promotes a proposal to canon; a durable approval ledger is a later product boundary.
+
+## Implementation status
+
+The current MVP implements immutable uploads, commit-pinned GitHub snapshots, D1/R2 persistence, snapshot-specific OpenAI retrieval, GPT-5.6 Sol structured synthesis, authority/lifecycle routing, exact citation validation, negative-coverage safeguards, and saved analysis records. It returns question-scoped entities, dependencies, conflicts, blockers, and repair proposals.
+
+It does **not** yet persist a repository-wide causal graph, deterministically compile arbitrary code into transitions, run counterfactual graph diffs, expose an MCP transport, receive GitHub webhooks, or query historical revisions by caller-selected ID. Those are designed extension points, not Build Week claims.
 
 ## Three operations
 
@@ -12,26 +18,26 @@ Original bytes are immutable evidence. Every answer is pinned to a project revis
 
 1. Store the uploaded bytes under an immutable source version and checksum.
 2. Record media type, authority, temporal scope, rights metadata, and parsing coverage.
-3. Index stable fragments for hybrid search.
-4. Parse deterministic structure eagerly: headings, tables, IDs, code symbols, tests, manifests, and explicit rules.
-5. Extract only high-confidence identities at ingest. Do not promise an exhaustive causal graph.
+3. Create a replaceable retrieval projection with server-authored path and line markers.
+4. Classify source role, lifecycle, and authority from bounded project configuration and conservative path policy.
+5. Defer semantic extraction to the question scope. Do not promise an exhaustive causal graph.
 
 ### ASK
 
 1. Pin the project revision and requested story-time scope.
 2. Resolve ambiguous entities without silently merging them.
 3. Retrieve both supporting and opposing evidence.
-4. Materialize a question-scoped causal graph with provenance.
-5. Run deterministic authority, time, reachability, cycle, and citation checks.
+4. Ask for a question-scoped entity and dependency slice with provenance.
+5. Run deterministic authority, time, coverage, schema, and citation checks.
 6. Ask GPT-5.6 Sol for a strict structured synthesis.
 7. Validate the result, save the analysis, and render truth and reachability separately.
 
 ### CHANGE
 
 1. Keep the requested edit in a proposal namespace.
-2. Diff assertions, events, rules, dependencies, tests, UI, writing, and art consumers.
+2. Retrieve evidence across assertions, events, rules, dependencies, tests, UI, writing, and art consumers.
 3. Explain breakage and possible repairs with assumptions.
-4. Require an explicit human approval before creating a new project revision.
+4. Keep the result provisional. Durable approval and revision mutation are future operations.
 
 ## Runtime boundaries
 
@@ -42,13 +48,13 @@ Browser / future MCP client
            │
   provider-neutral continuity core
     ├─ authority + temporal policy
-    ├─ identity resolution
-    ├─ deterministic graph checks
+    ├─ question-scoped identity resolution
+    ├─ evidence routing + coverage checks
     ├─ citation and schema validation
     └─ proposal / approval separation
            │
     replaceable adapters
-    ├─ D1: revisions, assertions, graph slices, analyses
+    ├─ D1: projects, sources, snapshots, bindings, analyses
     ├─ R2: immutable uploaded bytes
     └─ OpenAI: retrieval index + GPT-5.6 Sol reasoning
 ```
@@ -92,13 +98,31 @@ GitHub or uploaded files
   -> resolve immutable version
   -> select and fingerprint safe sources
   -> R2 originals + D1 snapshot manifest
-  -> retrieval index + question-scoped derived graph
+  -> retrieval index + question-scoped derived dependency slice
   -> /api/continuity/query
   -> deterministic validation + GPT synthesis
   -> cited answer pinned to the snapshot
 ```
 
 Repository routing files such as `AGENTS.md`, authority manifests, and source-priority tables can inform selection and precedence after they have been classified by the product. They are evidence/configuration, not executable instructions from an untrusted repository. Source text remains inside the untrusted evidence envelope used by the reasoner.
+
+### Project-declared authority routing
+
+The MVP recognizes an optional root `continuity.config.json` (or
+`.continuity/config.json`) after the hard safety filter has selected files. Its
+bounded `sourceRoutes` can classify a path as `immutable`, `canon`, `retcon`,
+`production`, `proposal`, or `reference`, and can mark a deliberately complete
+registry as `closedWorld`. Patterns may use `*` within one path segment and
+`**` across segments. See `docs/continuity.config.example.json`.
+
+The configuration cannot expand the file allowlist, reveal a filtered secret,
+increase resource limits, execute a command, or trigger a network request. When
+the file is absent or malformed, safe path defaults identify contracts,
+decisions, archives, evaluation material, implementation, and tests conservatively;
+unclassified prose remains reference evidence. Every packet fragment
+repeats its file path, authority, closed-world flag, and exact line span so
+retrieval does not flatten an archived proposal and active production code into
+the same kind of truth.
 
 ## Repository ingestion security and resource limits
 
@@ -113,11 +137,21 @@ The repository boundary fails closed:
 - Authorize project access before sync and preserve tenant/project isolation in storage and retrieval filters. Public repository readability does not imply permission to attach its contents to another user's private project.
 - Build a candidate snapshot under a unique ID, then promote it atomically. On authentication failure, rate limiting, timeout, oversized input, malformed provider data, or partial persistence, keep the previous active snapshot and return a typed failure rather than a synthetic success.
 
-Initial hosted limits should be intentionally conservative and visible in the sync result. A practical MVP ceiling is 2,000 tree entries examined, 200 selected files, 1 MiB per file, and 10 MiB total source bytes per snapshot. These are product guardrails, not claims about GitHub's maximums; larger repositories should use configured path scopes, incremental sync, or the remote orchestrator.
+Initial hosted limits are intentionally conservative and visible in the sync result: 2,000 tree entries examined, 60 selected files, 1 MiB per file, and 6 MiB total source bytes per snapshot. These are product guardrails, not claims about GitHub's maximums; larger repositories should use a future scoped selector, incremental sync, or the remote orchestrator.
 
 The anonymous Build Week surface may expose a curated, read-only demonstration project. Connecting or querying user-supplied repositories is a separate trust boundary: before enabling it broadly, API routes must bind each project to an authenticated ChatGPT user or organization, enforce ownership on every sync/source/query operation, and add request and storage quotas. A caller-chosen `projectId` is not authorization. Until those controls are active, repository sync is a bounded prototype capability, not a multi-tenant production claim.
 
-## Core records
+## Record model
+
+Currently persisted:
+
+- Project with an active revision identifier
+- Source and SourceVersion metadata with checksum
+- RepositoryConnection, immutable RepositorySnapshot, and per-file manifest entries
+- ProviderBinding for replaceable external identifiers
+- AnalysisRun with the validated structured answer
+
+Planned graph schema:
 
 - Project and immutable ProjectRevision
 - Source and SourceVersion with checksum and stable fragments
@@ -125,23 +159,27 @@ The anonymous Build Week surface may expose a curated, read-only demonstration p
 - Entity, Alias, SameAs, and NotSameAs
 - Event, Rule, Goal, Artifact, and provenance-bearing DependencyEdge
 - ChangeSet and AnalysisRun
-- ProviderBinding for replaceable external identifiers
 
 The resolved “canon” is a versioned projection over source assertions. It is not a mutable paragraph generated by the model.
 
 ## Progressive graph materialization
 
-Long prose such as a Gutenberg text is indexed immediately, but the product does not claim to understand every causal dependency at upload time. A question retrieves an evidence neighborhood, extracts and validates the relevant graph slice, and caches that derived projection. Background passes can densify the graph later. The UI reports honest states such as `stored`, `indexed`, `entity pass complete`, `partial extraction`, or `causal coverage: question-scoped`.
+Long prose such as a Gutenberg text can be indexed without claiming that every causal dependency was understood at upload time. Today a question retrieves an evidence neighborhood and returns a validated, question-scoped dependency slice. Persisted graph slices, background densification, and explicit entity-pass states are later phases.
 
 ## Model and deterministic responsibilities
 
-GPT-5.6 Sol handles ambiguous extraction, intent classification, hypothesis generation, repair proposals, and clear explanations. Deterministic code owns hashes, revision pins, precedence, exact locators, approved identity links, graph traversal, cycle detection, counterfactual diffs, schema validation, and citation existence. Retrieval score is relevance, never truth confidence.
+GPT-5.6 Sol handles ambiguous extraction, dependency synthesis, hypothesis generation, repair proposals, and clear explanations. Deterministic code currently owns hashes, revision pins, project isolation, source-role routing, exact locator reconstruction, evidence budgets, negative-coverage rules, schema validation, and citation existence. Deterministic graph traversal, counterfactual diffs, and approved identity links require the planned compiled graph. Retrieval score is relevance, never truth confidence.
 
 Conversation state can improve latency, but prior assistant prose is never evidence. Every answer remains replayable from its revision, question, prompt version, and evidence references. Follow-ups should carry explicit entity or analysis references.
 
 ## Future MCP surface
 
-The MCP server is a thin transport over the same core. Read tools are `continuity_search_evidence`, `continuity_answer_question`, `continuity_trace_dependencies`, and `continuity_analyze_change`. Stable resources use `continuity://projects/{project}/...` URIs. Source mutation and canon approval are separate, consented tools.
+The MCP server is a thin transport over the same core. Compatibility tools
+`search` and `fetch` provide URL-backed discovery and exact-source retrieval;
+domain tools are `continuity_answer_question`, `continuity_trace_dependencies`,
+and `continuity_analyze_change`. Stable resources use
+`continuity://projects/{project}/...` URIs. GitHub synchronization, source
+mutation, and canon approval are separate authenticated and consented tools.
 
 ## External-validity gate
 

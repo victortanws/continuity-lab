@@ -1,32 +1,55 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-type ProjectSettings = {
-  title: string;
-  protagonist: string;
-  goalAmount: number;
-  triggerFlag: string;
-  canonNote: string;
+type Verdict = "SUPPORTED" | "CONFLICT" | "AMBIGUOUS" | "UNREACHABLE" | "INSUFFICIENT_EVIDENCE" | "PROPOSAL";
+type EngineMode = "ready" | "demonstration" | "gpt-5.6-sol" | "unavailable";
+type ProjectMode = "sample" | "workspace";
+type SourcePanel = "sample" | "upload" | "github" | "mcp";
+type EnginePreference = "demo" | "live";
+type AnalysisMode = "answer_question" | "evaluate_change" | "trace_dependencies";
+
+type EvidenceReference = {
+  evidenceId: string;
+  sourceId: string;
+  locator: string;
+  stance: "supports" | "opposes" | "context";
+  supports: string;
+  title?: string;
+  excerpt?: string;
 };
 
-type Inquiry = {
-  question: string;
-  status: string;
-  headline: string;
-  summary: string;
-  verdict: ApiVerdict;
-};
-
-type ApiVerdict = "SUPPORTED" | "CONFLICT" | "AMBIGUOUS" | "UNREACHABLE" | "INSUFFICIENT_EVIDENCE" | "PROPOSAL";
+type EntityReference = { id: string; name: string; type: string; aliases: string[] };
+type DependencyEdge = { from: string; to: string; relation: string; status: string; evidenceIds: string[] };
+type Conflict = { type: string; statement: string; severity: string; evidenceIds: string[] };
+type ChangeProposal = { summary: string; assumptions: string[]; requiredChanges: string[]; downstreamRisks: string[] };
 
 type UiAnswer = {
   status: string;
   tone: "danger" | "warning" | "resolved";
   headline: string;
   summary: string;
-  evidence: string[];
-  verdict: ApiVerdict;
+  verdict: Verdict;
+  confidence: string;
+  revision: string;
+  scope: string;
+  evidence: EvidenceReference[];
+  entities: EntityReference[];
+  dependencies: DependencyEdge[];
+  conflicts: Conflict[];
+  blockers: string[];
+  path: string[];
+  proposal: ChangeProposal | null;
+  followUps: string[];
+};
+
+type StoredSource = {
+  id: string;
+  logicalName: string;
+  filename: string;
+  byteSize: number;
+  indexStatus: string;
+  authority: string;
 };
 
 type RepositoryState = {
@@ -35,106 +58,141 @@ type RepositoryState = {
   ref: string;
   commit: string;
   fileCount?: number;
+  capability?: string;
   message: string;
 };
 
-const INITIAL_ANSWER: UiAnswer = {
-  status: "READY TO TRACE",
+const SAMPLE_PROJECT_ID = "vcs-demo";
+const WORKSPACE_PROJECT_ID = "continuity-workspace";
+const DEFAULT_QUESTION = "Can the founder pay for the $47,000 operation by Day 24—and what must be built if not?";
+
+const EMPTY_ANSWER: UiAnswer = {
+  status: "READY",
   tone: "warning",
-  headline: "The promise is visible. Ask the engine whether the path is real.",
-  summary: "Continuity Lab will pin this question to the VCS demo revision, retrieve the relevant story and runtime evidence, test the dependency path, and return a cited verdict.",
-  evidence: ["Narrative Contract", "Economy Table", "Trigger Graph"],
+  headline: "Ask a causal question, not just a lookup.",
+  summary: "Continuity Lab retrieves the relevant source fragments, resolves the entities in the question, tests the dependency path, and returns a cited verdict.",
   verdict: "INSUFFICIENT_EVIDENCE",
+  confidence: "—",
+  revision: "Not traced yet",
+  scope: "No evidence has been evaluated yet.",
+  evidence: [],
+  entities: [],
+  dependencies: [],
+  conflicts: [],
+  blockers: [],
+  path: [],
+  proposal: null,
+  followUps: [],
 };
 
-const DEFAULT_SETTINGS: ProjectSettings = {
-  title: "Vibe Coder Simulator",
-  protagonist: "FOUNDER",
-  goalAmount: 47000,
-  triggerFlag: "grandma-surgery-funded",
-  canonNote:
-    "Grandma's deteriorating eyesight gives the Founder a concrete obligation: pay for a $47,000 sight-restoring operation without abandoning the company journey.",
+const EMPTY_REPOSITORY: RepositoryState = {
+  phase: "idle",
+  repository: "No repository connected",
+  ref: "Default branch",
+  commit: "Not pinned yet",
+  message: "Paste a public GitHub URL to create an immutable evidence snapshot.",
 };
 
-const BASE_SOURCES = [
-  { id: "DOC-01", name: "Narrative Contract", detail: "Goal, stakes, and ending promise", color: "cyan" },
-  { id: "SYS-02", name: "Economy Table", detail: "Cash, revenue, and investment gates", color: "violet" },
-  { id: "CODE-07", name: "Story Triggers", detail: "Runtime conditions and flags", color: "orange" },
-  { id: "ART-27", name: "Grandma Asset Record", detail: "Identity and visual states", color: "rose" },
+const SUGGESTED_QUESTIONS = [
+  "Which story state has a consumer but no producer?",
+  "What must happen before the investment offer can trigger?",
+  "What breaks if the operation target changes to $60,000?",
 ];
 
 const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-  if (name === "spark") return <svg {...common}><path d="m12 3-1.2 5.3L6 10l4.8 1.7L12 17l1.2-5.3L18 10l-4.8-1.7L12 3Z"/><path d="m5 16-.6 2.2L2 19l2.4.8L5 22l.6-2.2L8 19l-2.4-.8L5 16Z"/></svg>;
   if (name === "arrow") return <svg {...common}><path d="M5 12h14M13 6l6 6-6 6"/></svg>;
-  if (name === "edit") return <svg {...common}><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>;
   if (name === "upload") return <svg {...common}><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>;
   if (name === "check") return <svg {...common}><path d="m5 12 4 4L19 6"/></svg>;
-  if (name === "x") return <svg {...common}><path d="M18 6 6 18M6 6l12 12"/></svg>;
   if (name === "link") return <svg {...common}><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2"/></svg>;
+  if (name === "code") return <svg {...common}><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></svg>;
+  if (name === "file") return <svg {...common}><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/></svg>;
+  if (name === "branch") return <svg {...common}><circle cx="6" cy="5" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 8c4 0 4-1 8-1"/></svg>;
   if (name === "download") return <svg {...common}><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 21h14"/></svg>;
-  if (name === "layers") return <svg {...common}><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>;
-  return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>;
+  return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/></svg>;
 };
 
 export default function Home() {
-  const [settings, setSettings] = useState<ProjectSettings>(() => {
-    if (typeof window === "undefined") return DEFAULT_SETTINGS;
-    try {
-      const saved = window.localStorage.getItem("continuity-lab-project-v2");
-      return saved ? JSON.parse(saved) as ProjectSettings : DEFAULT_SETTINGS;
-    } catch {
-      return DEFAULT_SETTINGS;
-    }
-  });
-  const [draft, setDraft] = useState<ProjectSettings>(DEFAULT_SETTINGS);
-  const [question, setQuestion] = useState("Can the current game actually fund Grandma's $47,000 operation?");
-  const [analyzedQuestion, setAnalyzedQuestion] = useState(question);
+  const [projectMode, setProjectMode] = useState<ProjectMode>("sample");
+  const [sourcePanel, setSourcePanel] = useState<SourcePanel>("sample");
+  const [question, setQuestion] = useState(DEFAULT_QUESTION);
+  const [analyzedQuestion, setAnalyzedQuestion] = useState(DEFAULT_QUESTION);
+  const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [showEditor, setShowEditor] = useState(false);
-  const [activeTab, setActiveTab] = useState("diagnosis");
-  const [candidateStatus, setCandidateStatus] = useState<"review" | "approved" | "revision">("review");
-  const [localSources, setLocalSources] = useState<{ id: string; name: string; detail: string; color: string }[]>([]);
-  const [toast, setToast] = useState("");
-  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
-  const [answer, setAnswer] = useState<UiAnswer>(INITIAL_ANSWER);
-  const [engineMode, setEngineMode] = useState<"ready" | "demonstration" | "gpt-5.6-sol" | "unavailable">("ready");
+  const [isUploading, setIsUploading] = useState(false);
+  const [engineMode, setEngineMode] = useState<EngineMode>("ready");
+  const [answer, setAnswer] = useState<UiAnswer>(EMPTY_ANSWER);
+  const [sources, setSources] = useState<StoredSource[]>([]);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryRef, setRepositoryRef] = useState("");
-  const [repository, setRepository] = useState<RepositoryState>({
-    phase: "idle",
-    repository: "No repository connected",
-    ref: "Default branch",
-    commit: "Not pinned yet",
-    message: "Connect a public GitHub repository to create the first evidence snapshot.",
-  });
+  const [repository, setRepository] = useState<RepositoryState>(EMPTY_REPOSITORY);
+  const [toast, setToast] = useState("");
 
-  const money = useMemo(() => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(settings.goalAmount), [settings.goalAmount]);
-  const allSources = [...BASE_SOURCES, ...localSources];
+  const activeProjectId = projectMode === "sample" ? SAMPLE_PROJECT_ID : WORKSPACE_PROJECT_ID;
+  const workspaceEvidenceCount = sources.length + (repository.fileCount ?? 0);
+  const sourceLabel = projectMode === "sample"
+    ? "VCS sample · reviewed evidence pack"
+    : workspaceEvidenceCount
+      ? `Live workspace · ${workspaceEvidenceCount} evidence item${workspaceEvidenceCount === 1 ? "" : "s"}`
+      : "Live workspace · awaiting sources";
+
+  const projectStats = useMemo(() => [
+    { value: answer.entities.length, label: "entities resolved" },
+    { value: answer.dependencies.length, label: "causal edges" },
+    { value: answer.conflicts.length, label: "conflicts" },
+    { value: answer.evidence.length, label: "cited sources" },
+  ], [answer]);
+
+  const loadRepositoryStatus = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await fetch(`/api/continuity/repositories?projectId=${WORKSPACE_PROJECT_ID}`, { signal });
+      if (!response.ok) return;
+      const payload = await response.json() as Record<string, unknown>;
+      const next = presentRepository(payload);
+      if (next) {
+        setRepository(next);
+        if (next.repository.startsWith("http")) setRepositoryUrl(next.repository);
+        if (next.ref !== "Default branch") setRepositoryRef(next.ref);
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+    }
+  }, []);
+
+  const loadSources = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await fetch(`/api/continuity/sources?projectId=${WORKSPACE_PROJECT_ID}`, { signal });
+      if (!response.ok) return;
+      const payload = await response.json() as { sources?: StoredSource[] };
+      setSources(Array.isArray(payload.sources) ? payload.sources : []);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+    }
+  }, []);
+
+  const loadWorkspace = useCallback(async (signal?: AbortSignal) => {
+    await Promise.all([loadRepositoryStatus(signal), loadSources(signal)]);
+  }, [loadRepositoryStatus, loadSources]);
 
   useEffect(() => {
     const controller = new AbortController();
-    async function loadRepositoryStatus() {
-      try {
-        const response = await fetch("/api/continuity/repositories?projectId=vcs-demo", { signal: controller.signal });
-        if (!response.ok) return;
-        const payload = await response.json() as Record<string, unknown>;
-        const next = presentRepository(payload);
-        if (next) {
-          setRepository(next);
-          if (next.repository.startsWith("http")) setRepositoryUrl(next.repository);
-          if (next.ref !== "Default branch") setRepositoryRef(next.ref);
-        }
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) return;
-      }
-    }
-    void loadRepositoryStatus();
-    return () => controller.abort();
-  }, []);
+    const timer = window.setTimeout(() => void loadWorkspace(controller.signal), 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [loadWorkspace]);
 
-  async function analyze(nextQuestion?: string) {
-    const value = nextQuestion ?? question;
+  useEffect(() => {
+    if (repository.phase !== "syncing") return;
+    const timer = window.setInterval(() => void loadRepositoryStatus(), 2500);
+    return () => window.clearInterval(timer);
+  }, [loadRepositoryStatus, repository.phase]);
+
+  async function analyze(nextQuestion?: string, enginePreference?: EnginePreference) {
+    const value = (nextQuestion ?? question).trim();
+    if (!value) return;
+    const analysis = analysisRequestFor(value);
     if (nextQuestion) setQuestion(nextQuestion);
     setIsAnalyzing(true);
     try {
@@ -142,82 +200,57 @@ export default function Home() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          projectId: "vcs-demo",
-          timeScope: "through the current playable build",
-          storyPosition: 8,
+          projectId: activeProjectId,
           question: value,
-          proposedChange: settings.goalAmount === 47000 ? null : `Change the operation goal from $47,000 to ${money}.`,
-          conversation: inquiries.slice(-4).map((item) => ({ question: item.question, answer: item.summary, verdict: item.verdict })),
+          analysisMode: analysis.mode,
+          proposedChange: analysis.proposedChange,
+          enginePreference: enginePreference ?? (projectMode === "sample" ? "demo" : "live"),
+          timeScope: projectMode === "sample" ? "through the current VCS demonstration build" : "the active commit-pinned workspace revision",
+          storyPosition: projectMode === "sample" ? 8 : undefined,
         }),
       });
-      const payload = await response.json() as { mode?: "demonstration" | "gpt-5.6-sol"; answer?: Record<string, unknown>; error?: string; message?: string };
+      const payload = await response.json() as { mode?: "demonstration" | "gpt-5.6-sol"; answer?: Record<string, unknown>; retrievedEvidence?: Array<Record<string, unknown>>; error?: string; message?: string };
       if (!response.ok || !payload.answer) throw new Error(payload.message ?? payload.error ?? "The continuity service is unavailable.");
-      const result = presentAnswer(payload.answer);
+      setAnswer(presentAnswer(payload.answer, payload.retrievedEvidence ?? []));
       setAnalyzedQuestion(value);
-      setAnswer(result);
+      setHasAnalyzed(true);
       setEngineMode(payload.mode ?? "demonstration");
-      setInquiries((current) => [...current.filter((item) => item.question !== value), { question: value, status: result.status, headline: result.headline, summary: result.summary, verdict: result.verdict }].slice(-4));
-      document.getElementById("analysis")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      window.setTimeout(() => document.getElementById("analysis")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The continuity service is unavailable.";
-      setEngineMode("unavailable");
       setAnalyzedQuestion(value);
-      setAnswer({ status: "SERVICE PAUSED", tone: "warning", headline: "The evidence engine could not complete this trace.", summary: `${message} No scripted answer has been substituted.`, evidence: [], verdict: "INSUFFICIENT_EVIDENCE" });
+      setHasAnalyzed(true);
+      setEngineMode("unavailable");
+      setAnswer({
+        ...EMPTY_ANSWER,
+        status: "SETUP NEEDED",
+        headline: projectMode === "workspace" ? "The workspace is stored, but live reasoning is not configured." : "The evidence engine could not complete this trace.",
+        summary: `${error instanceof Error ? error.message : "The continuity service is unavailable."} No scripted answer has been substituted.`,
+      });
     } finally {
       setIsAnalyzing(false);
     }
   }
 
-  function saveProject() {
-    setSettings(draft);
-    window.localStorage.setItem("continuity-lab-project-v2", JSON.stringify(draft));
-    setShowEditor(false);
-    showToast("Scenario saved · source evidence unchanged");
-  }
-
-  function resetProject() {
-    setDraft(DEFAULT_SETTINGS);
-    setSettings(DEFAULT_SETTINGS);
-    window.localStorage.removeItem("continuity-lab-project-v2");
-    setShowEditor(false);
-    showToast("Demo project restored");
-  }
-
-  function showToast(message: string) {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 2600);
-  }
-
-  function exportProject() {
-    const blob = new Blob([JSON.stringify({ project: settings, sources: allSources }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "continuity-lab-project.json";
-    anchor.click();
-    URL.revokeObjectURL(url);
-    showToast("Project packet exported");
-  }
-
   async function addSource(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    setIsUploading(true);
     const form = new FormData();
-    form.set("projectId", "vcs-demo");
+    form.set("projectId", WORKSPACE_PROJECT_ID);
+    form.set("projectTitle", "Continuity Lab workspace");
     form.set("authority", "reference");
     form.set("file", file);
     try {
       const response = await fetch("/api/continuity/sources", { method: "POST", body: form });
-      const payload = await response.json() as { source?: { id?: string; sourceId?: string; indexStatus?: string }; indexStatus?: string; status?: string; message?: string; error?: string };
-      if (!response.ok) throw new Error(payload.message ?? payload.error ?? "Upload failed");
-      const source = payload.source ?? {};
-      const sourceId = source.id ?? source.sourceId ?? `SOURCE-${Date.now().toString(36).toUpperCase()}`;
-      const indexStatus = source.indexStatus ?? payload.indexStatus ?? payload.status ?? "stored";
-      setLocalSources((current) => [...current.filter((item) => item.name !== file.name), { id: sourceId, name: file.name, detail: `${Math.max(1, Math.round(file.size / 1000))} KB · ${String(indexStatus).replaceAll("_", " ")}`, color: "green" }]);
-      showToast(`${file.name} stored · ${String(indexStatus).replaceAll("_", " ")}`);
+      const payload = await response.json() as { source?: StoredSource; capability?: string; message?: string; error?: string };
+      if (!response.ok) throw new Error(payload.message ?? payload.error ?? "Upload failed.");
+      await loadSources();
+      setProjectMode("workspace");
+      showToast(`${file.name} stored · ${String(payload.capability ?? payload.source?.indexStatus ?? "stored").replaceAll("_", " ")}`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Upload failed");
+      showToast(error instanceof Error ? error.message : "Upload failed.");
     } finally {
+      setIsUploading(false);
       event.target.value = "";
     }
   }
@@ -225,381 +258,273 @@ export default function Home() {
   async function syncRepository(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const requestedRepository = repositoryUrl.trim();
-    const requestedRef = repositoryRef.trim();
     if (!requestedRepository) return;
     setRepository({
       phase: "syncing",
       repository: requestedRepository,
-      ref: requestedRef || "Default branch",
+      ref: repositoryRef.trim() || "Default branch",
       commit: "Resolving revision…",
-      message: "Reading permitted files and pinning one exact revision. No repository code is being run.",
+      message: "Selecting permitted files and pinning one exact revision. Repository code is never executed.",
     });
     try {
       const response = await fetch("/api/continuity/repositories", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: "vcs-demo", repository: requestedRepository, ref: requestedRef || undefined }),
+        body: JSON.stringify({ projectId: WORKSPACE_PROJECT_ID, repository: requestedRepository, ref: repositoryRef.trim() || undefined }),
       });
       const payload = await response.json() as Record<string, unknown>;
-      if (!response.ok) throw new Error(readMessage(payload) ?? "The repository could not be synced.");
-      const next = presentRepository(payload) ?? {
-        phase: "ready" as const,
-        repository: requestedRepository,
-        ref: requestedRef || "Default branch",
-        commit: "Pinned by the evidence service",
-        message: "The snapshot is ready. Ask a question above to trace this revision.",
-      };
-      setRepository(next);
-      showToast("Repository snapshot pinned");
+      if (!response.ok) throw new Error(readMessage(payload) ?? "The repository could not be synchronized.");
+      const next = presentRepository(payload);
+      if (next) setRepository(next);
+      setProjectMode("workspace");
+      showToast("Commit-pinned repository snapshot created");
     } catch (error) {
       setRepository({
         phase: "attention",
         repository: requestedRepository,
-        ref: requestedRef || "Default branch",
-        commit: "No new snapshot created",
-        message: error instanceof Error ? error.message : "The repository could not be synced.",
+        ref: repositoryRef.trim() || "Default branch",
+        commit: "No snapshot created",
+        message: error instanceof Error ? error.message : "The repository could not be synchronized.",
       });
     }
+  }
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2800);
+  }
+
+  function exportTrace() {
+    const blob = new Blob([JSON.stringify({ project: activeProjectId, question: analyzedQuestion, answer }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "continuity-lab-trace.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showToast("Cited trace exported");
   }
 
   return (
     <main>
       <nav className="topbar">
-        <a className="brand" href="#top" aria-label="Continuity Lab home">
-          <span className="brand-mark"><Icon name="spark" size={20}/></span>
-          <span>Continuity <i>Lab</i></span>
-        </a>
-        <div className="nav-context">
-          <span className="project-dot" />
-          <span className="nav-project">{settings.title}</span>
-          <span className="source-count">{allSources.length} sources</span>
-        </div>
-        <div className="nav-actions">
-          <button className="button ghost compact" onClick={exportProject}><Icon name="download" size={16}/> Export</button>
-          <button className="button light compact" onClick={() => { setDraft(settings); setShowEditor(true); }}><Icon name="edit" size={16}/> Edit project</button>
-        </div>
+        <a className="brand" href="#top" aria-label="Continuity Lab home"><span className="brand-mark"><Icon name="branch" size={18}/></span><span>Continuity <i>Lab</i></span></a>
+        <div className="nav-status"><span className="status-dot"/><span>{sourceLabel}</span></div>
+        <div className="nav-actions"><a href="#sources">Connect sources</a><button onClick={exportTrace} disabled={!hasAnalyzed}><Icon name="download" size={15}/> Export trace</button></div>
       </nav>
 
       <section className="hero" id="top">
-        <div className="hero-art" aria-hidden="true" />
-        <div className="hero-wash" />
-        <div className="hero-orb orb-one" />
-        <div className="hero-orb orb-two" />
+        <div className="hero-image" aria-hidden="true" />
         <div className="hero-inner">
-          <div className="eyebrow"><span>●</span> STORY INTELLIGENCE FOR GAME TEAMS</div>
-          <h1>Build forward.<br/><em>Without story drift.</em></h1>
-          <p className="hero-copy">Bring the project once. Then ask whether characters, events, economics, code, and art still agree—and what must happen next.</p>
+          <div className="hero-copy-block">
+            <div className="eyebrow">CONTINUITY INTELLIGENCE FOR GAME TEAMS</div>
+            <h1>Can the story<br/><em>become true?</em></h1>
+            <p>Upload a script, story bible, PDF, or game repository. Continuity Lab maps the relevant characters, events, rules, and dependencies—then GPT-5.6 answers with citations and shows what would break.</p>
+          </div>
 
           <div className="question-card">
-            <div className="question-label"><Icon name="spark" size={16}/> Ask across every source in the project</div>
-            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} aria-label="Question about project canon" />
+            <div className="mode-row">
+              <button className={projectMode === "sample" ? "active" : ""} onClick={() => setProjectMode("sample")}><span/> Try the VCS sample</button>
+              <button className={projectMode === "workspace" ? "active" : ""} onClick={() => setProjectMode("workspace")}><span/> Use my workspace</button>
+            </div>
+            <label htmlFor="continuity-question">Ask what must be true—or what a change would break</label>
+            <textarea id="continuity-question" value={question} onChange={(event) => setQuestion(event.target.value)} />
             <div className="question-footer">
-              <div className="question-meta"><span className="pulse-dot"/> {engineMode === "gpt-5.6-sol" ? "GPT-5.6 Sol · evidence retraced" : engineMode === "demonstration" ? "Validated demo core · API key pending" : engineMode === "unavailable" ? "Evidence service unavailable" : "Evidence engine · ready"}</div>
-              <button className="button primary" onClick={() => void analyze()} disabled={isAnalyzing || !question.trim()}>
-                {isAnalyzing ? <span className="spinner"/> : <Icon name="arrow" size={18}/>} {isAnalyzing ? "Tracing…" : "Trace consequences"}
-              </button>
+              <div className={`engine-badge ${engineMode}`}><span/>{engineLabel(engineMode, projectMode)}</div>
+              <button className="primary-button" onClick={() => void analyze()} disabled={isAnalyzing || !question.trim()}>{isAnalyzing ? <span className="spinner"/> : <Icon name="arrow" size={18}/>} {isAnalyzing ? "Tracing evidence…" : "Trace consequences"}</button>
             </div>
           </div>
 
-          <div className="prompt-row">
-            <span>Try</span>
-            {["Who is Grandma?", `How is Grandma related to ${settings.protagonist}?`, "What breaks if surgery costs $60,000?"].map((prompt) => (
-              <button key={prompt} onClick={() => void analyze(prompt)}>{prompt}</button>
-            ))}
-          </div>
+          <div className="prompt-row"><span>Try a test</span>{SUGGESTED_QUESTIONS.map((prompt) => <button key={prompt} onClick={() => void analyze(prompt)}>{prompt}</button>)}</div>
         </div>
-        <div className="hero-person" aria-hidden="true"><img src="/art/vcs-founder-canonical.png" alt="" /></div>
       </section>
 
-      <section className="analysis-section" id="analysis">
+      <section className="sources-section" id="sources">
+        <div className="section-intro">
+          <div><div className="eyebrow dark">START WITH A SOURCE OF TRUTH</div><h2>Bring the project in once.<br/>Question the pinned revision.</h2></div>
+          <p>The browser does not “read GitHub live” on every question. An explicit sync creates a safe, immutable snapshot. Uploads, GitHub, the Site, and a future MCP client all route into the same evidence service.</p>
+        </div>
+
+        <div className="pipeline" aria-label="Continuity Lab processing pipeline">
+          {["Connect source", "Pin revision", "Resolve evidence", "Reason with GPT-5.6", "Validate & cite"].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong>{index < 4 && <i>→</i>}</div>)}
+        </div>
+
+        <div className="source-workspace">
+          <div className="source-tabs" role="tablist">
+            {(["sample", "upload", "github", "mcp"] as SourcePanel[]).map((tab) => <button key={tab} role="tab" aria-selected={sourcePanel === tab} className={sourcePanel === tab ? "active" : ""} onClick={() => setSourcePanel(tab)}>{tab === "sample" ? "VCS sample" : tab === "upload" ? "Upload files" : tab === "github" ? "GitHub repository" : "MCP"}</button>)}
+          </div>
+
+          <div className="source-panel">
+            {sourcePanel === "sample" && (
+              <SamplePanel onUse={() => { setProjectMode("sample"); setQuestion(DEFAULT_QUESTION); showToast("VCS sample selected"); }}/>
+            )}
+            {sourcePanel === "upload" && (
+              <UploadPanel sources={sources} isUploading={isUploading} onChange={addSource}/>
+            )}
+            {sourcePanel === "github" && (
+              <GitHubPanel repository={repository} repositoryUrl={repositoryUrl} repositoryRef={repositoryRef} setRepositoryUrl={setRepositoryUrl} setRepositoryRef={setRepositoryRef} onSubmit={syncRepository}/>
+            )}
+            {sourcePanel === "mcp" && <McpPanel/>}
+          </div>
+        </div>
+      </section>
+
+      <section className={`analysis-section ${hasAnalyzed ? "has-result" : ""}`} id="analysis">
         <div className="section-heading">
-          <div><div className="eyebrow dark">LIVE PROJECT TRACE</div><h2>{analyzedQuestion}</h2></div>
+          <div><div className="eyebrow dark">CITED CONTINUITY TRACE</div><h2>{hasAnalyzed ? analyzedQuestion : "The answer surface changes with the evidence."}</h2></div>
           <span className={`verdict ${answer.tone}`}><span/>{answer.status}</span>
         </div>
 
-        <div className="inquiry-trail">
-          <div className="trail-intro"><span className="trail-oracle"><img src="/art/vcs-oracle.png" alt=""/></span><div><small>PROJECT INQUIRY</small><strong>Ask follow-ups without losing the evidence trail.</strong></div></div>
-          <div className="trail-items">
-            {(inquiries.length ? inquiries : [{ question: analyzedQuestion, status: answer.status, headline: answer.headline, summary: answer.summary, verdict: answer.verdict }]).map((item, index) => (
-              <button className={item.question === analyzedQuestion ? "active" : ""} key={`${item.question}-${index}`} onClick={() => void analyze(item.question)}>
-                <span>{String(index + 1).padStart(2, "0")}</span><div><strong>{item.question}</strong><small>{item.status} · {item.headline}</small></div>
-              </button>
-            ))}
-          </div>
-        </div>
+        {engineMode === "demonstration" && <div className="honesty-banner"><strong>Validated sample mode</strong><span>This answer uses the reviewed VCS fallback. The live control reruns this exact question through the configured OpenAI API path.</span><button className="live-test-icon" aria-label="Run this exact question live with the OpenAI API" onClick={() => void analyze(undefined, "live")} disabled={isAnalyzing}><Icon name="code" size={17}/></button></div>}
+        {engineMode === "unavailable" && <div className="honesty-banner attention"><strong>Live setup incomplete</strong><span>The workspace remains stored safely. Add the OpenAI API key in Site settings to index it and activate GPT-5.6 retrieval.</span></div>}
 
-        <div className="analysis-grid">
-          <article className="result-card main-result">
-            <div className="result-kicker"><Icon name="layers" size={17}/> CONCLUSION</div>
+        <div className="answer-grid">
+          <article className="answer-card primary-answer">
+            <div className="answer-meta"><span>{answer.verdict.replaceAll("_", " ")}</span><span>{answer.confidence} confidence</span><span>{shortRevision(answer.revision)}</span></div>
             <h3>{answer.headline}</h3>
-            <p className="result-summary">{answer.summary}</p>
-            <div className="evidence-strip">
-              <span>Supported by</span>
-              {answer.evidence.map((item) => <button key={item}>{item}</button>)}
-            </div>
+            <p>{answer.summary}</p>
+          </article>
+          <div className="stat-grid">{projectStats.map((stat) => <div key={stat.label}><strong>{stat.value}</strong><span>{stat.label}</span></div>)}</div>
+        </div>
+
+        <div className="inspection-grid">
+          <article className="instrument-card dependency-card">
+            <div className="card-heading"><div><span>CAUSAL SLICE</span><h3>What depends on what</h3></div><small>{answer.dependencies.length || answer.path.length} relation{(answer.dependencies.length || answer.path.length) === 1 ? "" : "s"}</small></div>
+            <DependencyView dependencies={answer.dependencies} path={answer.path}/>
+            {answer.blockers.length > 0 && <div className="blocker-list"><strong>Blockers</strong>{answer.blockers.map((item) => <p key={item}><span>!</span>{item}</p>)}</div>}
           </article>
 
-          <article className="result-card character-result">
-            <div className="portrait-ring"><img src="/art/vcs-grandma-preop.png" alt="Grandma, an older woman in a terracotta cardigan"/></div>
-            <div><div className="result-kicker">PRIMARY REFERENT · CAST-27</div><h3>Grandma</h3><p>The Founder&apos;s sharp, independent grandmother. She is not USER_0047&apos;s grandmother; that second woman remains a distinct person even when a UI binding confuses them.</p></div>
+          <article className="instrument-card entity-card">
+            <div className="card-heading"><div><span>ENTITY RESOLUTION</span><h3>Who and what the answer means</h3></div><small>question-scoped</small></div>
+            <div className="entity-list">{answer.entities.length ? answer.entities.map((entity) => <div key={entity.id}><span>{entity.type}</span><strong>{entity.name}</strong><small>{entity.id}{entity.aliases.length ? ` · ${entity.aliases.slice(0, 2).join(", ")}` : ""}</small></div>) : <EmptyState copy="Run a trace to resolve the entities relevant to this question."/>}</div>
           </article>
         </div>
 
-        <div className="trace-card">
-          <div className="trace-header">
-            <div><div className="result-kicker">DEPENDENCY TRACE</div><h3>The promise exists. The bridge does not.</h3></div>
-            <div className="legend"><span className="good"/> Established <span className="bad"/> Missing <span className="future"/> Downstream</div>
-          </div>
-          <div className="trace-flow">
-            <TraceNode badge="DAY 8" title="Grandma calls" detail="Eyesight is worsening" state="good" />
-            <TraceArrow />
-            <TraceNode badge="OBLIGATION" title={`${money} needed`} detail="Canonical goal" state="good" />
-            <TraceArrow state="bad" />
-            <TraceNode badge="MISSING" title="Funding event" detail="No reachable route" state="bad" />
-            <TraceArrow state="future" />
-            <TraceNode badge="FLAG" title={settings.triggerFlag} detail="Never emitted" state="future" />
-            <TraceArrow state="future" />
-            <TraceNode badge="PAYOFF" title="Grandma can read" detail="Post-op state" state="future" />
-          </div>
-          <div className="trace-insight"><span className="insight-icon">!</span><p><strong>Why this matters:</strong> the player can keep earning indefinitely, but time passing is not the same as causal progress. The game needs an attainable money path and a one-time story trigger.</p></div>
+        <div className="inspection-grid lower">
+          <article className="instrument-card evidence-card">
+            <div className="card-heading"><div><span>PROVENANCE</span><h3>Evidence you can inspect</h3></div><small>{answer.scope}</small></div>
+            <div className="evidence-list">{answer.evidence.length ? answer.evidence.map((item) => <details key={item.evidenceId}><summary><span className={`stance ${item.stance}`}>{item.stance}</span><span><strong>{item.title || item.sourceId}</strong><code>{item.locator}</code></span><Icon name="arrow" size={14}/></summary><div className="evidence-detail"><p>{item.supports}</p>{item.excerpt && <blockquote>{item.excerpt}</blockquote>}</div></details>) : <EmptyState copy="Every factual verdict will appear here with its source and locator."/>}</div>
+          </article>
+
+          <article className="instrument-card repair-card">
+            <div className="card-heading"><div><span>MINIMAL REPAIR</span><h3>Turn diagnosis into work</h3></div></div>
+            {answer.proposal ? <><p className="proposal-summary">{answer.proposal.summary}</p><div className="repair-list">{answer.proposal.requiredChanges.map((item, index) => <div key={item}><span>{String(index + 1).padStart(2, "0")}</span><p>{item}</p></div>)}</div>{answer.proposal.downstreamRisks.length > 0 && <details><summary>Downstream risks</summary>{answer.proposal.downstreamRisks.map((risk) => <p key={risk}>{risk}</p>)}</details>}</> : <EmptyState copy="When a change is possible, the engine returns assumptions, affected work, and downstream risks without silently promoting the proposal to canon."/>}
+          </article>
         </div>
 
-        <div className="workbench">
-          <div className="workbench-head">
-            <div><div className="eyebrow dark">FROM DIAGNOSIS TO DELIVERY</div><h2>A repair packet the team can use</h2></div>
-            <button className="button dark" onClick={() => showToast("Work packet copied to the demo clipboard")}>Copy work packet <Icon name="arrow" size={17}/></button>
-          </div>
-          <div className="tabs" role="tablist">
-            {["diagnosis", "writing", "engineering", "design", "art"].map((tab) => <button role="tab" aria-selected={activeTab === tab} className={activeTab === tab ? "active" : ""} key={tab} onClick={() => setActiveTab(tab)}>{tab}</button>)}
-          </div>
-          <div className="tab-panel">
-            <WorkPanel tab={activeTab} settings={settings} money={money}/>
-          </div>
-        </div>
+        {answer.conflicts.length > 0 && <div className="conflict-strip"><strong>{answer.conflicts.length} conflict{answer.conflicts.length === 1 ? "" : "s"} found</strong>{answer.conflicts.map((conflict) => <p key={`${conflict.type}-${conflict.statement}`}><span>{conflict.severity}</span>{conflict.statement}</p>)}</div>}
+        {answer.followUps.length > 0 && <div className="follow-ups"><span>Keep testing</span>{answer.followUps.slice(0, 3).map((item) => <button key={item} onClick={() => void analyze(item)}>{item}<Icon name="arrow" size={14}/></button>)}</div>}
       </section>
 
-      <section className="art-section">
-        <div className="art-heading">
-          <div className="eyebrow">ART STATE REVIEW</div>
-          <h2>See the future—<br/><em>without making it canon.</em></h2>
-          <p>The system can identify a missing visual state, generate a grounded proposal from an approved identity reference, and keep it quarantined until a human decides.</p>
-          <div className="art-principle"><Icon name="check" size={17}/><span><strong>Identity preserved.</strong> Age, jade earrings, warm gray bun, and quiet independence carry forward.</span></div>
-          <div className="art-principle"><Icon name="check" size={17}/><span><strong>State changed.</strong> She can read comfortably after recovery; no magical de-aging or fantasy cure.</span></div>
-        </div>
-        <div className="art-comparison">
-          <div className="art-card before">
-            <img src="/art/vcs-grandma-preop.png" alt="Approved pre-operation Grandma character art"/>
-            <div className="art-card-label"><span className="status approved">APPROVED</span><strong>Pre-operation identity</strong><small>CAST-27 · existing VCS asset</small></div>
-          </div>
-          <div className="art-transition"><Icon name="arrow" size={22}/><span>causal state change</span></div>
-          <div className="art-card candidate">
-            <img src="/art/vcs-grandma-postop-candidate.png" alt="Proposed illustration of Grandma reading after a successful operation"/>
-            <div className="candidate-overlay"><span>PROPOSAL</span><small>Not canon until approved</small></div>
-            <div className="art-card-label"><span className={`status ${candidateStatus}`}>{candidateStatus === "approved" ? "LOCALLY APPROVED" : candidateStatus === "revision" ? "REVISION NEEDED" : "AWAITING REVIEW"}</span><strong>Post-operation payoff</strong><small>Generated from the approved identity</small></div>
-            <div className="art-actions">
-              <button onClick={() => { setCandidateStatus("approved"); showToast("Local demo decision recorded"); }}><Icon name="check" size={16}/> Approve</button>
-              <button onClick={() => { setCandidateStatus("revision"); showToast("Candidate marked for revision"); }}><Icon name="edit" size={16}/> Revise</button>
-            </div>
-          </div>
-        </div>
+      <section className="build-week-section">
+        <div><div className="eyebrow">THE BUILD WEEK PROOF</div><h2>Source → conflict → repair.<br/><em>In one visible loop.</em></h2></div>
+        <div className="proof-points"><div><span>01</span><strong>Real input</strong><p>A fresh file or commit-pinned repository—not a pasted summary.</p></div><div><span>02</span><strong>Real reasoning</strong><p>GPT-5.6 operates on retrieved evidence and returns a strict answer contract.</p></div><div><span>03</span><strong>Useful output</strong><p>Exact citations, causal blockers, blast radius, and a repair packet.</p></div></div>
       </section>
 
-      <section className="proof-section">
-        <div className="proof-copy">
-          <div className="eyebrow dark">A SECOND WORLD, THE SAME METHOD</div>
-          <h2>Not a Grandma detector.<br/>A continuity engine.</h2>
-          <p>In <em>Slap the Heavens</em>, the same trace tests power progression against an immutable physical rule, chapter setup, and approved character states.</p>
-          <div className="proof-question">“Can Tae-min jump from F rank to B rank in Chapter 2?”</div>
-          <div className="proof-answer"><span>CONFLICT</span><p>No. The rank ladder and zero-generation rule require staged recognition of broader redirection categories. Propose the missing demonstrations first.</p></div>
-        </div>
-        <div className="proof-art">
-          <div className="proof-img tae"><img src="/art/slap-taemin-earth.png" alt="Han Tae-min in office clothes"/></div>
-          <div className="proof-img beast"><img src="/art/slap-crownbeast.png" alt="The Abyssal Crownbeast"/></div>
-          <div className="proof-vs">F <small>→</small> B?</div>
-        </div>
-      </section>
-
-      <section className="sources-section">
-        <div className="sources-head"><div><div className="eyebrow dark">PROJECT MEMORY</div><h2>Grounded in sources you control.</h2></div><label className="button outline"><Icon name="upload" size={17}/> Add a source<input type="file" accept=".txt,.md,.json,.yaml,.yml,.pdf,.html,.docx,.epub" onChange={(event) => void addSource(event)}/></label></div>
-        <div className="repository-connector" aria-labelledby="repository-title">
-          <div className="repository-main">
-            <div className="repository-copy">
-              <span className="repository-symbol"><Icon name="layers" size={22}/></span>
-              <div className="result-kicker">REPOSITORY MEMORY</div>
-              <h3 id="repository-title">Bring the source of truth with you.</h3>
-              <p>Continuity Lab takes a read-only snapshot of approved files at one exact commit. It understands the folder structure as evidence; it does not execute the repository.</p>
-              <div className="repository-promises" aria-label="Repository safeguards">
-                <span><Icon name="check" size={14}/> Commit-pinned</span>
-                <span><Icon name="check" size={14}/> Read-only</span>
-                <span><Icon name="check" size={14}/> Reproducible answers</span>
-              </div>
-            </div>
-            <form className="repository-form" onSubmit={(event) => void syncRepository(event)}>
-              <div className="repository-fields">
-                <label className="repository-url">
-                  <span>GitHub repository URL</span>
-                  <input type="url" inputMode="url" autoComplete="url" placeholder="https://github.com/your-team/your-story" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} aria-describedby="repository-help" required />
-                </label>
-                <label>
-                  <span>Branch, tag, or commit <i>optional</i></span>
-                  <input placeholder="main" value={repositoryRef} onChange={(event) => setRepositoryRef(event.target.value)} />
-                </label>
-              </div>
-              <button className="button repository-button" type="submit" disabled={repository.phase === "syncing" || !repositoryUrl.trim()}>
-                {repository.phase === "syncing" ? <span className="spinner"/> : <Icon name="arrow" size={17}/>} {repository.phase === "syncing" ? "Creating snapshot…" : repository.phase === "ready" ? "Sync a new revision" : "Create snapshot"}
-              </button>
-              <p id="repository-help">Public repositories can be read directly. Private repositories need a project-level GitHub connection.</p>
-            </form>
-          </div>
-          <div className={`repository-status ${repository.phase}`} role="status" aria-live="polite">
-            <div className="repository-state">
-              <span className="repository-state-dot" />
-              <div><small>SOURCE REVISION</small><strong>{repository.phase === "idle" ? "Ready to connect" : repository.phase === "syncing" ? "Creating a safe snapshot" : repository.phase === "ready" ? "Snapshot ready" : "Needs attention"}</strong></div>
-            </div>
-            <dl>
-              <div><dt>Repository</dt><dd>{shortRepository(repository.repository)}</dd></div>
-              <div><dt>Revision</dt><dd>{repository.ref}</dd></div>
-              <div><dt>Commit</dt><dd>{shortCommit(repository.commit)}</dd></div>
-              {typeof repository.fileCount === "number" && <div><dt>Evidence files</dt><dd>{repository.fileCount.toLocaleString()}</dd></div>}
-            </dl>
-            <p><strong>Suggested next step</strong>{repository.message}</p>
-          </div>
-          <p className="snapshot-note"><Icon name="clock" size={15}/><span>A later push never changes an old answer silently. Sync again when you deliberately want Continuity Lab to adopt a new revision.</span></p>
-        </div>
-        <div className="source-grid">{allSources.map((source) => <div className="source-item" key={source.id}><span className={`source-icon ${source.color}`}><Icon name="link" size={18}/></span><div><small>{source.id}</small><strong>{source.name}</strong><p>{source.detail}</p></div><span className="source-check"><Icon name="check" size={14}/></span></div>)}</div>
-        <p className="local-note">Uploads are versioned as immutable project evidence. Their status tells you whether they are stored only or also searchable by the reasoning service; a stored file is never presented as indexed.</p>
-      </section>
-
-      <footer><div className="brand"><span className="brand-mark"><Icon name="spark" size={18}/></span><span>Continuity <i>Lab</i></span></div><p>Truth that can move—without drifting.</p><button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top ↑</button></footer>
-
-      {showEditor && <div className="modal-backdrop" onMouseDown={() => setShowEditor(false)}><section className="editor" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="editor-head"><div><div className="eyebrow dark">PROPOSAL SANDBOX</div><h2>Scenario variables</h2><p>Explore a change without silently rewriting project truth.</p></div><button className="icon-button" onClick={() => setShowEditor(false)} aria-label="Close editor"><Icon name="x"/></button></div>
-        <div className="form-grid">
-          <label><span>Project title</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })}/></label>
-          <label><span>Protagonist ID</span><input value={draft.protagonist} onChange={(e) => setDraft({ ...draft, protagonist: e.target.value })}/></label>
-          <label><span>Operation goal (USD)</span><input type="number" value={draft.goalAmount} onChange={(e) => setDraft({ ...draft, goalAmount: Number(e.target.value) })}/></label>
-          <label><span>Completion flag</span><input value={draft.triggerFlag} onChange={(e) => setDraft({ ...draft, triggerFlag: e.target.value })}/></label>
-          <label className="full"><span>Canonical note</span><textarea value={draft.canonNote} onChange={(e) => setDraft({ ...draft, canonNote: e.target.value })}/></label>
-        </div>
-        <div className="editor-note"><Icon name="clock" size={17}/><p>This sandbox saves a local proposal. It does not alter source evidence or canon; approval would create a new revision and recalculate the blast radius.</p></div>
-        <div className="editor-actions"><button className="button ghost" onClick={resetProject}>Reset demo</button><button className="button primary" onClick={saveProject}>Save scenario <Icon name="arrow" size={17}/></button></div>
-      </section></div>}
-      {toast && <div className="toast"><Icon name="check" size={17}/>{toast}</div>}
+      <footer><div className="brand"><span className="brand-mark"><Icon name="branch" size={18}/></span><span>Continuity <i>Lab</i></span></div><p>Make every story change explain itself.</p><button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top ↑</button></footer>
+      {toast && <div className="toast"><Icon name="check" size={16}/>{toast}</div>}
     </main>
   );
 }
 
-function TraceNode({ badge, title, detail, state }: { badge: string; title: string; detail: string; state: string }) {
-  return <div className={`trace-node ${state}`}><span>{badge}</span><strong>{title}</strong><small>{detail}</small></div>;
+function SamplePanel({ onUse }: { onUse: () => void }) {
+  return <div className="sample-panel"><div className="source-symbol coral"><Icon name="branch" size={23}/></div><div><span className="panel-kicker">REVIEWED EXAMPLE</span><h3>VibeCode Simulator</h3><p>A deliberately small evidence pack for testing identity, reachability, trigger gaps, and counterfactual cost changes before connecting the real repository.</p><div className="sample-tags"><span>story contract</span><span>economy</span><span>runtime triggers</span><span>tests</span></div></div><button className="outline-button" onClick={onUse}>Use sample <Icon name="arrow" size={16}/></button></div>;
 }
 
-function TraceArrow({ state = "good" }: { state?: string }) {
-  return <div className={`trace-arrow ${state}`}><span/><i>›</i></div>;
+function UploadPanel({ sources, isUploading, onChange }: { sources: StoredSource[]; isUploading: boolean; onChange: (event: ChangeEvent<HTMLInputElement>) => void }) {
+  return <div className="upload-panel"><label className="upload-drop"><input type="file" accept=".txt,.md,.markdown,.json,.pdf,.docx,.html" onChange={(event) => void onChange(event)}/><span className="source-symbol blue"><Icon name="upload" size={23}/></span><strong>{isUploading ? "Storing and indexing…" : "Upload a source"}</strong><p>Story bible, script, design document, PDF, JSON, or Gutenberg text · up to 20 MB</p><small>The original is hashed and versioned. Stored and indexed are shown as different states.</small></label><div className="uploaded-list"><div className="panel-heading"><span>WORKSPACE SOURCES</span><strong>{sources.length}</strong></div>{sources.length ? sources.slice(0, 5).map((source) => <div key={source.id}><Icon name="file" size={17}/><span><strong>{source.logicalName || source.filename}</strong><small>{formatBytes(source.byteSize)} · {source.authority}</small></span><em className={source.indexStatus}>{source.indexStatus.replaceAll("_", " ")}</em></div>) : <EmptyState copy="Your uploaded evidence will appear here with its real storage and index status."/>}</div></div>;
 }
 
-function WorkPanel({ tab, settings, money }: { tab: string; settings: ProjectSettings; money: string }) {
-  const panels: Record<string, { number: string; title: string; copy: string; tasks: string[]; accent: string }> = {
-    diagnosis: { number: "01", title: "The causal gap", copy: `The story promises a ${money} operation, but the current economy and trigger graph never jointly satisfy it.`, tasks: ["Keep Day 8 as the obligation setup", "Add a bounded path to the target amount", `Emit ${settings.triggerFlag} exactly once`, "Retire pre-operation dialogue after the flag"], accent: "violet" },
-    writing: { number: "02", title: "Pay off what Day 8 plants", copy: "Write an earned outcome, not a sudden windfall. Grandma remains an independent person rather than a prize at the end of a money bar.", tasks: ["Seed the medical timeline before the deadline", "Give Grandma agency in the decision", "Tie business progress to the funding route", "Write a quiet post-operation reading scene"], accent: "orange" },
-    engineering: { number: "03", title: "Make progress observable", copy: "Create an explicit story-state transition that can be tested, saved, and consumed by later dialogue and art.", tasks: ["Add goal-amount configuration", "Create a one-time funding resolver", "Persist the surgery-complete flag", "Add regression tests for pre/post states"], accent: "cyan" },
-    design: { number: "04", title: "Make the route fair", copy: "Show the player that income, timing, and the operation are connected—without turning Grandma into a progress meter.", tasks: ["Surface runway against the medical deadline", "Telegraph qualifying funding events", "Protect against unwinnable random sequences", "Give the payoff breathing room"], accent: "green" },
-    art: { number: "05", title: "Generate only the missing state", copy: "The approved Grandma identity exists. The gap is a post-operation payoff state with enough environmental context to communicate regained autonomy.", tasks: ["Use CAST-27 as identity reference", "Preserve age, bun, earrings, and dignity", "Show her reading without assistance", "Hold as proposal until human approval"], accent: "rose" },
+function GitHubPanel({ repository, repositoryUrl, repositoryRef, setRepositoryUrl, setRepositoryRef, onSubmit }: { repository: RepositoryState; repositoryUrl: string; repositoryRef: string; setRepositoryUrl: (value: string) => void; setRepositoryRef: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return <div className="github-panel"><form onSubmit={(event) => void onSubmit(event)}><div className="panel-kicker">READ-ONLY GITHUB SNAPSHOT</div><h3>Pin the codebase that the answer should mean.</h3><p>A branch name is resolved once. Every selected file is then tied to the resulting SHA, so a later push cannot silently rewrite an old answer.</p><label><span>Repository URL</span><input type="url" placeholder="https://github.com/your-team/your-game" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} required/></label><label><span>Branch, tag, or commit <i>optional</i></span><input placeholder="Default branch" value={repositoryRef} onChange={(event) => setRepositoryRef(event.target.value)}/></label><button className="dark-button" disabled={repository.phase === "syncing" || !repositoryUrl.trim()}>{repository.phase === "syncing" ? <span className="spinner light"/> : <Icon name="branch" size={17}/>} {repository.phase === "syncing" ? "Creating snapshot…" : "Create repository snapshot"}</button></form><div className={`repo-receipt ${repository.phase}`}><div className="receipt-head"><span/><strong>{repository.phase === "ready" ? "Snapshot ready" : repository.phase === "syncing" ? "Snapshot in progress" : repository.phase === "attention" ? "Needs attention" : "Awaiting repository"}</strong></div><dl><div><dt>Repository</dt><dd>{shortRepository(repository.repository)}</dd></div><div><dt>Revision</dt><dd>{repository.ref}</dd></div><div><dt>Commit</dt><dd>{shortCommit(repository.commit)}</dd></div>{typeof repository.fileCount === "number" && <div><dt>Evidence files</dt><dd>{repository.fileCount}</dd></div>}<div><dt>Capability</dt><dd>{(repository.capability ?? "not connected").replaceAll("_", " ")}</dd></div></dl><p>{repository.message}</p></div></div>;
+}
+
+function McpPanel() {
+  return <div className="mcp-panel"><div><div className="source-symbol ink"><Icon name="code" size={23}/></div><span className="panel-kicker">ONE CORE, MORE THAN ONE SURFACE</span><h3>Use the same pinned evidence from ChatGPT, Codex, or an editor.</h3><p>The MCP layer should expose read-only search and fetch primitives plus continuity-specific analysis tools. Repository synchronization remains an explicit authenticated operation; questions never trigger a surprise GitHub pull.</p></div><div className="mcp-contract"><span>REMOTE MCP CONTRACT</span><code>search(query, project_revision)</code><code>fetch(source_id, locator)</code><code>answer_question(question)</code><code>trace_dependencies(target)</code><code>analyze_change(proposal)</code><small>Contract designed · remote transport and authentication are the next deployment boundary.</small></div></div>;
+}
+
+function DependencyView({ dependencies, path }: { dependencies: DependencyEdge[]; path: string[] }) {
+  if (dependencies.length) return <div className="dependency-list">{dependencies.slice(0, 7).map((edge, index) => <div key={`${edge.from}-${edge.to}-${index}`} className={edge.status}><strong>{edge.from}</strong><span><i/>{edge.relation}</span><strong>{edge.to}</strong><em>{edge.status}</em></div>)}</div>;
+  if (path.length) return <div className="path-list">{path.map((item, index) => <div key={`${item}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{item}</p></div>)}</div>;
+  return <EmptyState copy="A dependency slice will appear here instead of a generic graph hairball."/>;
+}
+
+function EmptyState({ copy }: { copy: string }) {
+  return <div className="empty-state"><span>—</span><p>{copy}</p></div>;
+}
+
+function engineLabel(mode: EngineMode, projectMode: ProjectMode) {
+  if (mode === "gpt-5.6-sol") return "GPT-5.6 Sol · live evidence";
+  if (mode === "demonstration") return "Reviewed VCS sample";
+  if (mode === "unavailable") return "Live reasoning needs setup";
+  return projectMode === "sample" ? "VCS sample ready" : "Workspace selected";
+}
+
+function presentAnswer(raw: Record<string, unknown>, retrievedEvidence: Array<Record<string, unknown>> = []): UiAnswer {
+  const verdict = isVerdict(raw.verdict) ? raw.verdict : "INSUFFICIENT_EVIDENCE";
+  const reachability = asRecord(raw.reachability) ?? {};
+  const retrievedById = new Map(retrievedEvidence.map((item) => [stringValue(item.id, ""), item]));
+  const evidence = arrayOfRecords(raw.evidence).map((item) => {
+    const evidenceId = stringValue(item.evidenceId, "evidence");
+    const retrieved = retrievedById.get(evidenceId);
+    return {
+      evidenceId, sourceId: stringValue(item.sourceId, "Source"), locator: stringValue(item.locator, "locator unavailable"),
+      stance: ["supports", "opposes", "context"].includes(String(item.stance)) ? item.stance as EvidenceReference["stance"] : "context", supports: stringValue(item.supports, "Evidence used by the answer."),
+      title: retrieved ? stringValue(retrieved.title, "") : undefined,
+      excerpt: retrieved ? stringValue(retrieved.text, "") : undefined,
+    };
+  });
+  const entities = arrayOfRecords(raw.entities).map((item) => ({ id: stringValue(item.id, "unknown"), name: stringValue(item.name, "Unnamed entity"), type: stringValue(item.type, "entity"), aliases: stringArray(item.aliases) }));
+  const dependencies = arrayOfRecords(raw.dependencies).map((item) => ({ from: stringValue(item.from, "Unknown source"), to: stringValue(item.to, "Unknown target"), relation: stringValue(item.relation, "relates to"), status: stringValue(item.status, "proposed"), evidenceIds: stringArray(item.evidenceIds) }));
+  const conflicts = arrayOfRecords(raw.conflicts).map((item) => ({ type: stringValue(item.type, "conflict"), statement: stringValue(item.statement, "Conflicting evidence found."), severity: stringValue(item.severity, "medium"), evidenceIds: stringArray(item.evidenceIds) }));
+  const proposalRaw = asRecord(raw.proposal);
+  const proposal = proposalRaw ? { summary: stringValue(proposalRaw.summary, "Proposed repair"), assumptions: stringArray(proposalRaw.assumptions), requiredChanges: stringArray(proposalRaw.requiredChanges), downstreamRisks: stringArray(proposalRaw.downstreamRisks) } : null;
+  const status = verdict === "INSUFFICIENT_EVIDENCE" ? "EVIDENCE GAP" : verdict.replaceAll("_", " ");
+  const tone: UiAnswer["tone"] = verdict === "CONFLICT" || verdict === "UNREACHABLE" ? "danger" : verdict === "SUPPORTED" ? "resolved" : "warning";
+  const headlines: Record<Verdict, string> = {
+    SUPPORTED: "The current evidence supports this conclusion.", CONFLICT: "The active project evidence disagrees.", AMBIGUOUS: "The question resolves to more than one meaning.", UNREACHABLE: "The promise exists; its completion path does not.", INSUFFICIENT_EVIDENCE: "The available evidence cannot support a confident answer yet.", PROPOSAL: "The change is possible, but it has a dependency cost.",
   };
-  const panel = panels[tab] ?? panels.diagnosis;
-  return <div className="work-panel"><div className={`work-number ${panel.accent}`}>{panel.number}</div><div className="work-copy"><h3>{panel.title}</h3><p>{panel.copy}</p></div><div className="task-list">{panel.tasks.map((task) => <div key={task}><Icon name="check" size={15}/><span>{task}</span></div>)}</div></div>;
+  return {
+    status, tone, headline: headlines[verdict], summary: stringValue(raw.answer, "No answer was returned."), verdict,
+    confidence: stringValue(raw.confidence, "unknown"), revision: stringValue(raw.projectRevision, "unversioned"), scope: stringValue(reachability.completenessScope, "Retrieved evidence only"),
+    evidence, entities, dependencies, conflicts, blockers: stringArray(reachability.blockers), path: stringArray(reachability.path), proposal, followUps: stringArray(raw.followUpQuestions),
+  };
 }
 
 function presentRepository(payload: Record<string, unknown>): RepositoryState | null {
-  const nested = [payload, asRecord(payload.snapshot), asRecord(payload.connection), asRecord(payload.repository)].filter(Boolean) as Record<string, unknown>[];
-  const collection = Array.isArray(payload.repositories) ? payload.repositories : Array.isArray(payload.connections) ? payload.connections : [];
+  const records = [payload, asRecord(payload.connection), asRecord(payload.snapshot), asRecord(payload.repository)].filter(Boolean) as Record<string, unknown>[];
+  const collection = Array.isArray(payload.repositories) ? payload.repositories : [];
   const newest = collection.length ? asRecord(collection[0]) : null;
-  if (newest) nested.push(newest, asRecord(newest.snapshot) ?? {});
-
-  const repository = firstString(nested, ["repositoryUrl", "htmlUrl", "url", "repository", "fullName", "name"]);
-  const commit = firstString(nested, ["commitSha", "commit", "sha", "headSha", "snapshotId"]);
+  if (newest) records.push(newest, asRecord(newest.connection) ?? {}, asRecord(newest.snapshot) ?? {});
+  const repository = firstString(records, ["repositoryUrl", "htmlUrl", "url", "repository", "fullName"]);
+  const commit = firstString(records, ["commitSha", "commit", "sha", "snapshotId"]);
   if (!repository && !commit) return null;
-
-  const rawStatus = firstString(nested, ["status", "syncStatus", "indexStatus"])?.toLowerCase() ?? "ready";
-  const phase: RepositoryState["phase"] = rawStatus.includes("fail") || rawStatus.includes("error") || rawStatus.includes("attention") ? "attention"
-    : rawStatus === "syncing" || rawStatus.includes("pending") || rawStatus.includes("process") ? "syncing"
-      : "ready";
-  const message = readMessage(payload)
-    ?? (phase === "attention" ? "Review the repository address or access settings, then try again."
-      : phase === "syncing" ? "The evidence service is still preparing this revision."
-        : "Ask a question above. Answers will stay tied to this snapshot until you sync again.");
-
+  const rawStatus = firstString(records, ["indexStatus", "status", "syncStatus"])?.toLowerCase() ?? "ready";
+  const phase: RepositoryState["phase"] = rawStatus.includes("fail") || rawStatus.includes("error") ? "attention" : rawStatus.includes("indexing") || rawStatus.includes("pending") || rawStatus.includes("sync") ? "syncing" : "ready";
   return {
-    phase,
-    repository: repository ?? "Connected repository",
-    ref: firstString(nested, ["ref", "requestedRef", "defaultBranch", "branch", "tag"]) ?? "Default branch",
-    commit: commit ?? "Pinned by the evidence service",
-    fileCount: firstNumber(nested, ["fileCount", "indexedFileCount", "sourceCount", "entries"]),
-    message,
+    phase, repository: repository ?? "Connected repository", ref: firstString(records, ["requestedRef", "ref", "branch", "tag"]) ?? "Default branch", commit: commit ?? "Pinned snapshot",
+    fileCount: firstNumber(records, ["fileCount", "selectedFileCount", "entries"]), capability: firstString(records, ["capability", "indexStatus"]),
+    message: readMessage(payload) ?? (phase === "syncing" ? "The immutable snapshot is stored; the evidence index is still being prepared." : "Ask a question against this pinned revision."),
   };
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
-}
+function asRecord(value: unknown): Record<string, unknown> | null { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
+function arrayOfRecords(value: unknown) { return Array.isArray(value) ? value.map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item)) : []; }
+function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : []; }
+function stringValue(value: unknown, fallback: string) { return typeof value === "string" && value.trim() ? value.trim() : fallback; }
+function isVerdict(value: unknown): value is Verdict { return ["SUPPORTED", "CONFLICT", "AMBIGUOUS", "UNREACHABLE", "INSUFFICIENT_EVIDENCE", "PROPOSAL"].includes(String(value)); }
+function firstString(records: Record<string, unknown>[], keys: string[]) { for (const record of records) for (const key of keys) if (typeof record[key] === "string" && String(record[key]).trim()) return String(record[key]); return undefined; }
+function firstNumber(records: Record<string, unknown>[], keys: string[]) { for (const record of records) for (const key of keys) { const value = record[key]; if (typeof value === "number" && Number.isFinite(value)) return value; if (Array.isArray(value)) return value.length; } return undefined; }
+function readMessage(payload: Record<string, unknown>) { return firstString([payload, asRecord(payload.error) ?? {}, asRecord(payload.snapshot) ?? {}], ["message", "detail", "suggestedAction", "error"]); }
+function shortRepository(value: string) { return value.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").replace(/\/$/, ""); }
+function shortCommit(value: string) { return /^[a-f\d]{12,}$/i.test(value) ? value.slice(0, 10) : value; }
+function shortRevision(value: string) { return value.length > 24 ? `${value.slice(0, 10)}…${value.slice(-8)}` : value; }
+function formatBytes(value: number) { if (value < 1000) return `${value} B`; if (value < 1_000_000) return `${Math.round(value / 1000)} KB`; return `${(value / 1_000_000).toFixed(1)} MB`; }
 
-function firstString(records: Record<string, unknown>[], keys: string[]) {
-  for (const record of records) {
-    for (const key of keys) {
-      const value = record[key];
-      if (typeof value === "string" && value.trim()) return value;
-    }
-  }
-  return undefined;
-}
-
-function firstNumber(records: Record<string, unknown>[], keys: string[]) {
-  for (const record of records) {
-    for (const key of keys) {
-      const value = record[key];
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-      if (Array.isArray(value)) return value.length;
-    }
-  }
-  return undefined;
-}
-
-function readMessage(payload: Record<string, unknown>) {
-  return firstString([payload, asRecord(payload.error) ?? {}, asRecord(payload.snapshot) ?? {}], ["message", "detail", "suggestedAction", "error"]);
-}
-
-function shortRepository(value: string) {
-  return value.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").replace(/\/$/, "");
-}
-
-function shortCommit(value: string) {
-  return /^[a-f\d]{12,}$/i.test(value) ? value.slice(0, 8) : value;
-}
-
-function presentAnswer(raw: Record<string, unknown>): UiAnswer {
-  const verdict = (typeof raw.verdict === "string" ? raw.verdict : "INSUFFICIENT_EVIDENCE") as ApiVerdict;
-  const reachability = raw.reachability && typeof raw.reachability === "object" ? raw.reachability as Record<string, unknown> : {};
-  const entities = Array.isArray(raw.entities) ? raw.entities as Array<Record<string, unknown>> : [];
-  const references = Array.isArray(raw.evidence) ? raw.evidence as Array<Record<string, unknown>> : [];
-  const status = verdict === "AMBIGUOUS" ? `${Math.max(2, entities.length)} MATCHES`
-    : verdict === "CONFLICT" ? "CONFLICT"
-      : verdict === "UNREACHABLE" ? "UNREACHABLE"
-        : verdict === "SUPPORTED" ? "SUPPORTED"
-          : verdict === "PROPOSAL" ? "PROPOSAL"
-            : "EVIDENCE GAP";
-  const tone: UiAnswer["tone"] = verdict === "UNREACHABLE" || verdict === "CONFLICT" ? "danger" : verdict === "SUPPORTED" ? "resolved" : "warning";
-  const headline = verdict === "UNREACHABLE" ? "The obligation is true; the completion path is not yet reachable."
-    : verdict === "AMBIGUOUS" ? "The name resolves to more than one person."
-      : verdict === "CONFLICT" ? "Active project evidence disagrees."
-        : verdict === "PROPOSAL" ? "The change is possible, but it carries a dependency cost."
-          : verdict === "SUPPORTED" ? "The project evidence supports this conclusion."
-            : "The available evidence cannot support a confident answer yet.";
-  const coverage = typeof reachability.completenessScope === "string" && reachability.completenessScope ? ` Causal scope: ${reachability.completenessScope}.` : "";
-  return {
-    status,
-    tone,
-    headline,
-    summary: `${typeof raw.answer === "string" ? raw.answer : "No answer was returned."}${coverage}`,
-    evidence: references.map((item) => `${String(item.sourceId ?? "Source")} · ${String(item.locator ?? "locator unavailable")}`).slice(0, 5),
-    verdict,
-  };
+function analysisRequestFor(question: string): { mode: AnalysisMode; proposedChange: string | null } {
+  const normalized = question.toLowerCase();
+  const evaluatesChange = /\bwhat (?:breaks|changes|is affected)\b|\bblast radius\b|\bif (?:we |i )?(?:change|remove|replace|add|move)\b|\bchanges? (?:to|from)\b/.test(normalized);
+  if (evaluatesChange) return { mode: "evaluate_change", proposedChange: question };
+  const tracesDependencies = /\bmust happen\b|\bdepend(?:s|encies)?\b|\bprerequisite\b|\btrigger\b|\bproducer\b|\breach(?:able|ability)?\b|\bcan .+ (?:pay|reach|unlock|occur|happen)\b/.test(normalized);
+  return { mode: tracesDependencies ? "trace_dependencies" : "answer_question", proposedChange: null };
 }

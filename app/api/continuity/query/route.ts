@@ -1,4 +1,4 @@
-import type { ConversationTurn, QueryRequest, Verdict } from "@/lib/continuity/contracts";
+import type { AnalysisMode, ConversationTurn, QueryRequest, Verdict } from "@/lib/continuity/contracts";
 import { DemoReasoner, DemoRetriever, VCS_DEMO_REVISION } from "@/lib/continuity/demo";
 import { CompositeRetriever, ContinuityEngine, ContinuityInputError } from "@/lib/continuity/engine";
 import { OpenAIReasoner, OpenAIRetriever } from "@/lib/continuity/providers/openai";
@@ -10,6 +10,8 @@ const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const VERDICTS = new Set<Verdict>([
   "SUPPORTED", "CONFLICT", "AMBIGUOUS", "UNREACHABLE", "INSUFFICIENT_EVIDENCE", "PROPOSAL",
 ]);
+const ANALYSIS_MODES = new Set<AnalysisMode>(["answer_question", "evaluate_change", "trace_dependencies"]);
+const ENGINE_PREFERENCES = new Set(["auto", "demo", "live"] as const);
 
 type RuntimeEnv = {
   DB?: D1Database;
@@ -66,6 +68,12 @@ export async function POST(request: Request) {
   const proposedChange = typeof payload.proposedChange === "string"
     ? payload.proposedChange.trim().slice(0, 8_000) || null
     : null;
+  const requestedAnalysisMode = typeof payload.analysisMode === "string" && ANALYSIS_MODES.has(payload.analysisMode as AnalysisMode)
+    ? payload.analysisMode as AnalysisMode
+    : proposedChange ? "evaluate_change" : "answer_question";
+  const enginePreference = typeof payload.enginePreference === "string" && ENGINE_PREFERENCES.has(payload.enginePreference as "auto" | "demo" | "live")
+    ? payload.enginePreference as "auto" | "demo" | "live"
+    : "auto";
   if (!PROJECT_ID_PATTERN.test(projectId)) {
     return Response.json({ error: "A valid projectId is required." }, { status: 400 });
   }
@@ -86,8 +94,11 @@ export async function POST(request: Request) {
     }
 
     const activeRepositorySnapshot = await repository.getActiveRepositorySnapshot(projectId);
+    const repositoryIsQueryable = activeRepositorySnapshot?.indexStatus === "indexed";
     const repositoryScope = activeRepositorySnapshot
-      ? ` Repository snapshot ${activeRepositorySnapshot.commitSha} contributes ${activeRepositorySnapshot.selectedFileCount} selected files; complete coverage: ${Boolean(activeRepositorySnapshot.coverageComplete)}.`
+      ? repositoryIsQueryable
+        ? ` Repository snapshot ${activeRepositorySnapshot.commitSha} contributes ${activeRepositorySnapshot.selectedFileCount} selected files; complete coverage: ${Boolean(activeRepositorySnapshot.coverageComplete)}.`
+        : ` Repository snapshot ${activeRepositorySnapshot.commitSha} is stored but excluded from this answer because its index status is ${activeRepositorySnapshot.indexStatus}.`
       : "";
     const query: QueryRequest = {
       projectId,
@@ -97,6 +108,7 @@ export async function POST(request: Request) {
       timeScope: typeof payload.timeScope === "string" ? payload.timeScope.trim().slice(0, 240) || null : null,
       storyPosition: typeof payload.storyPosition === "number" && Number.isFinite(payload.storyPosition) ? payload.storyPosition : undefined,
       question,
+      analysisMode: requestedAnalysisMode,
       conversation: cleanConversation(payload.conversation),
       proposedChange,
       contextRefs: cleanStringArray(payload.contextRefs),
@@ -113,7 +125,7 @@ export async function POST(request: Request) {
     const apiKey = bindings.OPENAI_API_KEY?.trim();
     const vectorBinding = await repository.getProviderBinding(projectId, projectId, "vector_store");
     const vectorStoreId = vectorBinding?.externalId || bindings.OPENAI_VECTOR_STORE_ID?.trim();
-    const repositoryVectorStoreId = activeRepositorySnapshot
+    const repositoryVectorStoreId = activeRepositorySnapshot && repositoryIsQueryable
       ? (await repository.getProviderBinding(
           projectId,
           activeRepositorySnapshot.id,
@@ -121,8 +133,21 @@ export async function POST(request: Request) {
         ))?.externalId
       : undefined;
 
+    if (enginePreference === "live" && apiKey && activeRepositorySnapshot && !repositoryIsQueryable && !vectorStoreId) {
+      return Response.json({
+        error: `The pinned repository snapshot is ${activeRepositorySnapshot.indexStatus}; live questions begin only after it is indexed.`,
+        code: "snapshot_index_not_ready",
+        capability: "stored_only",
+      }, { status: 409 });
+    }
+
     let engine: ContinuityEngine;
-    if (apiKey && (vectorStoreId || repositoryVectorStoreId || projectId === "vcs-demo")) {
+    if (enginePreference === "demo") {
+      if (projectId !== "vcs-demo") {
+        return Response.json({ error: "Reviewed demonstration mode is available only for the sample project." }, { status: 400 });
+      }
+      engine = new ContinuityEngine(new DemoRetriever(), new DemoReasoner());
+    } else if (apiKey && (vectorStoreId || repositoryVectorStoreId || projectId === "vcs-demo")) {
       const retrievers = [
         ...(projectId === "vcs-demo" ? [new DemoRetriever()] : []),
         ...(vectorStoreId ? [new OpenAIRetriever(apiKey, vectorStoreId)] : []),
@@ -134,6 +159,12 @@ export async function POST(request: Request) {
         retrievers.length === 1 ? retrievers[0] : new CompositeRetriever(retrievers),
         new OpenAIReasoner(apiKey),
       );
+    } else if (enginePreference === "live") {
+      return Response.json({
+        error: "Live OpenAI analysis is not configured for this project.",
+        code: "live_reasoning_not_configured",
+        capability: "stored_only",
+      }, { status: 409 });
     } else if (projectId === "vcs-demo") {
       engine = new ContinuityEngine(new DemoRetriever(), new DemoReasoner());
     } else {

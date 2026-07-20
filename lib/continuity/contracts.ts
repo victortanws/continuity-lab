@@ -8,6 +8,92 @@ export type CanonAuthority =
   | "proposal"
   | "reference";
 
+/**
+ * Source role and lifecycle are deliberately separate from authority. A source
+ * can be excellent evidence of what is implemented while having no authority
+ * to decide what ought to be implemented.
+ */
+export type EvidenceRole =
+  | "intent"
+  | "decision"
+  | "configuration"
+  | "implementation"
+  | "test"
+  | "observation"
+  | "proposal"
+  | "archive"
+  | "asset"
+  | "reference"
+  | "evaluation";
+
+export type EvidenceLifecycle = "active" | "proposed" | "superseded" | "historical" | "unknown";
+
+export type ClaimKind =
+  | "identity"
+  | "normative"
+  | "configured"
+  | "implemented"
+  | "tested"
+  | "observed"
+  | "causal"
+  | "historical";
+
+export type AnalysisMode = "answer_question" | "evaluate_change" | "trace_dependencies";
+
+export type AnalysisCheck =
+  | "identity_scope"
+  | "authority_and_lifecycle"
+  | "temporal_scope"
+  | "claim_boundary"
+  | "preconditions_and_reachability"
+  | "actor_knowledge_and_authorization"
+  | "resource_conservation"
+  | "transition_ordering"
+  | "repeatability_and_idempotency"
+  | "state_and_asset_compatibility"
+  | "downstream_consumers"
+  | "verification_and_unknowns";
+
+export type AuthorityPolicyRule = {
+  id: string;
+  pathPattern: string;
+  role: EvidenceRole;
+  lifecycle?: EvidenceLifecycle;
+  authority?: CanonAuthority;
+  claimKinds?: ClaimKind[];
+};
+
+export type AuthorityPolicy = {
+  id: string;
+  version: string;
+  authorityWeights: Record<CanonAuthority, number>;
+  roleWeightsByClaimKind: Record<ClaimKind, Partial<Record<EvidenceRole, number>>>;
+  sourceRules: AuthorityPolicyRule[];
+  excludedRoles: EvidenceRole[];
+  protectedAuthorities: CanonAuthority[];
+  maxEvidence: number;
+  minimumPerLane: number;
+};
+
+export type AnalysisRoute = {
+  version: "continuity.route.v2";
+  policyId: string;
+  policyVersion: string;
+  mode: AnalysisMode;
+  claimKinds: ClaimKind[];
+  requiredRoles: EvidenceRole[];
+  requiredChecks: AnalysisCheck[];
+  selectedByRole: Partial<Record<EvidenceRole, number>>;
+  availableByRole: Partial<Record<EvidenceRole, number>>;
+  coverage: {
+    scope: string;
+    trustedComplete: boolean;
+    closedWorldEvidenceIds: string[];
+    excludedSources: string[];
+  };
+  diagnostics: string[];
+};
+
 export type Verdict =
   | "SUPPORTED"
   | "CONFLICT"
@@ -26,11 +112,19 @@ export type EvidenceChunk = {
   text: string;
   score: number;
   authority: CanonAuthority;
+  role?: EvidenceRole;
+  lifecycle?: EvidenceLifecycle;
+  claimKinds?: ClaimKind[];
+  authorityRank?: number | null;
+  epistemicOwner?: string | null;
+  world?: string | null;
   validFrom?: string | null;
   validTo?: string | null;
   validFromOrder?: number | null;
   validToOrder?: number | null;
   supersedesSourceId?: string | null;
+  supersedesEvidenceIds?: string[];
+  supersessionScope?: "evidence" | "source" | null;
   closedWorld?: boolean;
   claimKey?: string | null;
   polarity?: "positive" | "negative" | null;
@@ -49,6 +143,8 @@ export type QueryRequest = {
   timeScope?: string | null;
   storyPosition?: number;
   question: string;
+  analysisMode?: AnalysisMode;
+  claimKinds?: ClaimKind[];
   conversation?: ConversationTurn[];
   proposedChange?: string | null;
   contextRefs?: string[];
@@ -126,6 +222,7 @@ export type QueryResult = {
   model: string | null;
   answer: ContinuityAnswer;
   retrievedEvidence: EvidenceChunk[];
+  routing: AnalysisRoute;
   validation: {
     repaired: boolean;
     issues: string[];
@@ -139,7 +236,7 @@ export interface EvidenceRetriever {
 export interface ContinuityReasoner {
   readonly mode: QueryResult["mode"];
   readonly model: string | null;
-  answer(request: QueryRequest, evidence: EvidenceChunk[]): Promise<ContinuityAnswer>;
+  answer(request: QueryRequest, evidence: EvidenceChunk[], route?: AnalysisRoute): Promise<ContinuityAnswer>;
 }
 
 export const CONTINUITY_ANSWER_SCHEMA = {

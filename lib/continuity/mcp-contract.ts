@@ -27,6 +27,26 @@ const projectRevisionInput = {
 } as const;
 
 export const continuityMcpTools = {
+  search: {
+    description: "Compatibility search over one pinned project revision. Results are evidence candidates, never truth claims.",
+    inputSchema: {
+      ...projectRevisionInput,
+      required: [...projectRevisionInput.required, "query"],
+      properties: { ...projectRevisionInput.properties, query: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 50 } },
+    },
+  },
+  fetch: {
+    description: "Fetch one exact source excerpt from a pinned project revision using a source ID and optional locator.",
+    inputSchema: {
+      ...projectRevisionInput,
+      required: [...projectRevisionInput.required, "sourceId"],
+      properties: {
+        ...projectRevisionInput.properties,
+        sourceId: { type: "string", minLength: 1 },
+        locator: { type: "string", minLength: 1 },
+      },
+    },
+  },
   continuity_get_repository_snapshot: {
     description: "Inspect the active commit-pinned repository manifest, coverage, and omitted paths without fetching GitHub again.",
     inputSchema: {

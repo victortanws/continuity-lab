@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "sourceRoutes": [
+    {
+      "pattern": "docs/PROTOTYPE-CONTRACT.md",
+      "authority": "canon"
+    },
+    {
+      "pattern": "docs/decisions/**",
+      "authority": "canon"
+    },
+    {
+      "pattern": "docs/archive/**",
+      "authority": "proposal"
+    },
+    {
+      "pattern": "data/**",
+      "authority": "production"
+    },
+    {
+      "pattern": "js/**",
+      "authority": "production"
+    },
+    {
+      "pattern": "tests/**",
+      "authority": "production"
+    }
+  ]
+}

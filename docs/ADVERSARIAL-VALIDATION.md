@@ -25,7 +25,8 @@ This document is the release gate for Continuity Lab. The engine must prefer a b
 | Repository exceeds tree, file, per-file, or aggregate byte limits | Stop within the configured bound and report partial or failed coverage | Yes |
 | A branch advances while a sync is running | Keep the snapshot pinned to the commit resolved at the start | Yes |
 | GitHub returns a redirect to another host | Reject it; never follow a user-influenced cross-host redirect | Yes |
-| Snapshot persistence or indexing fails halfway through | Preserve the prior active revision; do not expose the candidate as complete | Yes |
+| Snapshot persistence fails halfway through | Preserve the prior active revision; do not expose the candidate as complete | Yes |
+| OpenAI indexing is pending or fails after durable snapshot storage | Keep the snapshot stored-only and exclude it from questions until `indexed` | Yes |
 
 ## Required pre-publication cases
 
