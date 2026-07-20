@@ -22,6 +22,8 @@ test("README and MVP keep the keyless MCP entry point and compatibility boundary
   assert.match(page, /five read-only tools/);
   assert.match(page, /domain-neutral evidence, identity, authority, and causality engine/);
   assert.match(page, /VCS is the current reviewed demonstration adapter/);
+  assert.match(page, /Version to analyze/);
+  assert.match(page, /Branch, release tag, or commit ID/);
   assert.match(page, /continuity_compile_material/);
   assert.match(page, /continuity_inspect_public_repository/);
   assert.match(page, /makes no OpenAI API call/);
