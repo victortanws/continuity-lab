@@ -433,7 +433,7 @@ export default function Home() {
       <section className="sources-section" id="sources">
         <div className="section-intro">
           <div><div className="eyebrow dark">START WITH A SOURCE OF TRUTH</div><h2>Bring the project in once.<br/>Question the pinned revision.</h2></div>
-          <p>The browser does not “read GitHub live” on every question. An explicit sync creates a safe, immutable snapshot. Uploads, GitHub, the Site, and a future MCP client all route into the same evidence service.</p>
+          <p>The browser does not “read GitHub live” on every question. An explicit sync creates a safe, immutable snapshot. Uploads, GitHub, the Site, and an MCP client all route into the same evidence service.</p>
         </div>
 
         <div className="pipeline" aria-label="Continuity Lab processing pipeline">
@@ -548,7 +548,7 @@ function GitHubPanel({ repository, repositoryUrl, repositoryRef, setRepositoryUr
 }
 
 function McpPanel() {
-  return <div className="mcp-panel"><div><div className="source-symbol ink"><Icon name="code" size={23}/></div><span className="panel-kicker">ONE CORE, MORE THAN ONE SURFACE</span><h3>Use the reviewed sample from ChatGPT, Codex, or another MCP client.</h3><p>The stateless <code>/mcp</code> transport exposes three read-only analysis tools over the immutable VCS demonstration. It never synchronizes GitHub or calls a paid provider. Private workspaces remain disabled until connector authentication and tenant scoping are implemented.</p></div><div className="mcp-contract"><span>REVIEWED SAMPLE MCP</span><code>answer_question(question)</code><code>trace_dependencies(target)</code><code>analyze_change(proposal)</code><small>Executable sample transport · pinned to vcs-demo-r1 · authenticated private workspace transport is next.</small></div></div>;
+  return <div className="mcp-panel"><div><div className="source-symbol ink"><Icon name="code" size={23}/></div><span className="panel-kicker">ONE CORE, MORE THAN ONE SURFACE</span><h3>Ask about the reviewed sample—or evidence you bring.</h3><p>The stateless <code>/mcp</code> transport exposes five read-only tools. Three analyze the immutable VCS demonstration; two verify text passed from an attachment or inspect a bounded public GitHub snapshot. It makes no OpenAI API call, so ChatGPT can supply the conversational reasoning without an application API key. The client must explicitly pass attachment excerpts; private repositories remain disabled.</p></div><div className="mcp-contract"><span>KEYLESS · READ-ONLY · CONTINUITY.MCP.V1</span><code>continuity_answer_question(question)</code><code>continuity_trace_dependencies(target)</code><code>continuity_analyze_change(proposal)</code><code>continuity_compile_material(documents, claims)</code><code>continuity_inspect_public_repository(url, question)</code><small>Connect this host’s /mcp endpoint · router v3.3 is separate metadata · the original v3.2 tool contracts remain compatible.</small></div></div>;
 }
 
 function DependencyView({ dependencies, path }: { dependencies: DependencyEdge[]; path: string[] }) {
