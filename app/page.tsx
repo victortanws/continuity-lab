@@ -12,6 +12,12 @@ type ProjectSettings = {
 
 type AnalysisKind = "reachability" | "identity" | "relation" | "blast-radius" | "general";
 
+type Inquiry = {
+  question: string;
+  status: string;
+  headline: string;
+};
+
 const DEFAULT_SETTINGS: ProjectSettings = {
   title: "Vibe Coder Simulator",
   protagonist: "USER_0047",
@@ -70,6 +76,7 @@ export default function Home() {
   const [candidateStatus, setCandidateStatus] = useState<"review" | "approved" | "revision">("review");
   const [localSources, setLocalSources] = useState<{ id: string; name: string; detail: string; color: string }[]>([]);
   const [toast, setToast] = useState("");
+  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
 
   const kind = useMemo(() => classifyQuestion(analyzedQuestion), [analyzedQuestion]);
   const money = useMemo(() => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(settings.goalAmount), [settings.goalAmount]);
@@ -80,7 +87,9 @@ export default function Home() {
     if (nextQuestion) setQuestion(nextQuestion);
     setIsAnalyzing(true);
     window.setTimeout(() => {
+      const result = getAnswer(classifyQuestion(value), settings, money);
       setAnalyzedQuestion(value);
+      setInquiries((current) => [...current.filter((item) => item.question !== value), { question: value, status: result.status, headline: result.headline }].slice(-4));
       setIsAnalyzing(false);
       document.getElementById("analysis")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 520);
@@ -155,15 +164,15 @@ export default function Home() {
         <div className="hero-orb orb-one" />
         <div className="hero-orb orb-two" />
         <div className="hero-inner">
-          <div className="eyebrow"><span>●</span> CANON CONSEQUENCE LAB</div>
-          <h1>Ask whether a story<br/>can <em>become true.</em></h1>
-          <p className="hero-copy">Trace a promise through narrative, economy, code, and art—then see exactly what must change to make it reachable.</p>
+          <div className="eyebrow"><span>●</span> STORY INTELLIGENCE FOR GAME TEAMS</div>
+          <h1>Build forward.<br/><em>Without story drift.</em></h1>
+          <p className="hero-copy">Bring the project once. Then ask whether characters, events, economics, code, and art still agree—and what must happen next.</p>
 
           <div className="question-card">
-            <div className="question-label"><Icon name="spark" size={16}/> Ask across the whole project</div>
+            <div className="question-label"><Icon name="spark" size={16}/> Ask across every source in the project</div>
             <textarea value={question} onChange={(event) => setQuestion(event.target.value)} aria-label="Question about project canon" />
             <div className="question-footer">
-              <div className="question-meta"><span className="pulse-dot"/> Evidence-backed · deterministic demo</div>
+              <div className="question-meta"><span className="pulse-dot"/> GPT-5.6 architecture · demo evaluator active</div>
               <button className="button primary" onClick={() => analyze()} disabled={isAnalyzing || !question.trim()}>
                 {isAnalyzing ? <span className="spinner"/> : <Icon name="arrow" size={18}/>} {isAnalyzing ? "Tracing…" : "Trace consequences"}
               </button>
@@ -177,13 +186,24 @@ export default function Home() {
             ))}
           </div>
         </div>
-        <div className="hero-person" aria-hidden="true"><img src="/art/vcs-grandma-preop.png" alt="" /></div>
+        <div className="hero-person" aria-hidden="true"><img src="/art/vcs-founder-canonical.png" alt="" /></div>
       </section>
 
       <section className="analysis-section" id="analysis">
         <div className="section-heading">
           <div><div className="eyebrow dark">LIVE PROJECT TRACE</div><h2>{analyzedQuestion}</h2></div>
           <span className={`verdict ${answer.tone}`}><span/>{answer.status}</span>
+        </div>
+
+        <div className="inquiry-trail">
+          <div className="trail-intro"><span className="trail-oracle"><img src="/art/vcs-oracle.png" alt=""/></span><div><small>PROJECT INQUIRY</small><strong>Ask follow-ups without losing the evidence trail.</strong></div></div>
+          <div className="trail-items">
+            {(inquiries.length ? inquiries : [{ question: analyzedQuestion, status: answer.status, headline: answer.headline }]).map((item, index) => (
+              <button className={item.question === analyzedQuestion ? "active" : ""} key={`${item.question}-${index}`} onClick={() => analyze(item.question)}>
+                <span>{String(index + 1).padStart(2, "0")}</span><div><strong>{item.question}</strong><small>{item.status} · {item.headline}</small></div>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="analysis-grid">
