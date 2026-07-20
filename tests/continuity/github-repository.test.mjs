@@ -407,7 +407,7 @@ test("GitHub synchronization resolves a mutable ref once and lists the immutable
   assert.equal(calls.some((call) => call.url.includes(`/git/trees/${TREE_SHA}`)), true);
   assert.equal(calls.some((call) => /git\/trees\/main/.test(call.url)), false);
   assert.equal(calls.every((call) => new URL(call.url).origin === "https://api.github.com"), true);
-  assert.equal(calls.every((call) => call.init?.redirect === "error"), true);
+  assert.equal(calls.every((call) => call.init?.redirect === "manual"), true);
 });
 
 test("blob retrieval verifies the commit-tree hash and byte size", async () => {
@@ -417,7 +417,7 @@ test("blob retrieval verifies the commit-tree hash and byte size", async () => {
   const provider = new GitHubRepositoryProvider({
     fetch: async (url, init) => {
       assert.equal(String(url), `https://api.github.com/repos/openai/openai-node/git/blobs/${blobSha}`);
-      assert.equal(init?.redirect, "error");
+      assert.equal(init?.redirect, "manual");
       return Response.json({ sha: blobSha, size: 5, encoding: "base64", content: btoa("hello") });
     },
   });
@@ -581,5 +581,5 @@ test("redirects to attacker-controlled hosts are rejected and never followed", a
     (error) => error instanceof RepositoryProviderError && error.code === "redirect_rejected",
   );
   assert.equal(new URL(call.url).origin, "https://api.github.com");
-  assert.equal(call.init.redirect, "error");
+  assert.equal(call.init.redirect, "manual");
 });

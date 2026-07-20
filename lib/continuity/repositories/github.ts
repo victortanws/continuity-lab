@@ -665,7 +665,11 @@ export class GitHubRepositoryProvider implements RepositoryProvider {
       response = await this.fetcher(url, {
         method: "GET",
         headers,
-        redirect: "error",
+        // Inspect the 3xx response ourselves and reject it below. `error`
+        // turns redirects into an indistinguishable fetch rejection in real
+        // runtimes, while `follow` could forward a future credential to a
+        // different host.
+        redirect: "manual",
         signal,
       });
     } catch (error) {

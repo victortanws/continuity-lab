@@ -439,7 +439,11 @@ export async function POST(request: Request): Promise<Response> {
           : await inspectRepositoryTool(argumentsValue);
         return rpcResult(id, result);
       } catch (error) {
-        const code = error instanceof McpContextError ? error.code : "context_preparation_failed";
+        const code = error instanceof McpContextError
+          ? error.code
+          : error instanceof RepositoryProviderError
+            ? `repository_${error.code}`
+            : "context_preparation_failed";
         const message = publicContextError(error);
         return rpcResult(id, toolError(code, message));
       }
