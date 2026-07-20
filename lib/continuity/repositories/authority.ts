@@ -20,6 +20,72 @@ export type RepositoryAuthorityMap = {
   routes: RepositoryAuthorityRoute[];
 };
 
+export type RepositoryPolicyTrust = "repository_declared" | "project_approved";
+
+export type DirectUploadDocumentType = "narrative" | "reference" | "proposal";
+
+export type DirectUploadEvidenceProfile = {
+  documentType: DirectUploadDocumentType;
+  authority: CanonAuthority;
+  closedWorld: false;
+  role: EvidenceRole;
+  lifecycle: EvidenceLifecycle;
+  claimKinds: ClaimKind[];
+};
+
+const DIRECT_UPLOAD_PROFILES: Record<DirectUploadDocumentType, DirectUploadEvidenceProfile> = {
+  narrative: {
+    documentType: "narrative",
+    authority: "reference",
+    closedWorld: false,
+    role: "intent",
+    lifecycle: "active",
+    claimKinds: ["identity", "normative", "causal"],
+  },
+  reference: {
+    documentType: "reference",
+    authority: "reference",
+    closedWorld: false,
+    role: "reference",
+    lifecycle: "active",
+    claimKinds: ["identity", "historical"],
+  },
+  proposal: {
+    documentType: "proposal",
+    authority: "proposal",
+    closedWorld: false,
+    role: "proposal",
+    lifecycle: "proposed",
+    claimKinds: ["normative", "causal", "historical"],
+  },
+};
+
+/**
+ * A direct upload may describe what kind of evidence it contains, but it may
+ * not mint approved canon or operational truth. The returned profile is wholly
+ * server-owned: callers select one bounded document type, never a role,
+ * lifecycle, claim-kind list, authority, or closed-world flag directly.
+ */
+export function classifyDirectUpload(
+  value: unknown,
+): DirectUploadEvidenceProfile | null {
+  if (typeof value !== "string" || !Object.hasOwn(DIRECT_UPLOAD_PROFILES, value)) return null;
+  const profile = DIRECT_UPLOAD_PROFILES[value as DirectUploadDocumentType];
+  return { ...profile, claimKinds: [...profile.claimKinds] };
+}
+
+/**
+ * Legacy uploads did not store a document type. Keep their fallback inside the
+ * same safe three-role envelope; filename heuristics can never turn a direct
+ * upload into configuration, implementation, test, observation, or canon.
+ */
+export function inferSafeDirectUploadType(path: string): DirectUploadDocumentType {
+  const role = classifyRepositoryPath(path).role;
+  if (role === "intent" || role === "decision") return "narrative";
+  if (role === "proposal") return "proposal";
+  return "reference";
+}
+
 /**
  * Repository configuration can classify already-selected evidence. It cannot
  * expand the connector's allowlist, reveal filtered files, execute code, or
@@ -61,10 +127,20 @@ export function parseRepositoryAuthorityRoutes(
 export function classifyRepositoryFile(
   path: string,
   routes: RepositoryAuthorityRoute[],
+  trust: RepositoryPolicyTrust = "repository_declared",
 ): Required<Pick<RepositoryAuthorityRoute, "authority" | "closedWorld" | "role" | "lifecycle" | "claimKinds">> {
   const profile = classifyRepositoryPath(path);
   const declared = routes.find((route) => globMatches(path, route.pattern));
   if (declared) {
+    if (trust !== "project_approved") {
+      return {
+        authority: lowerAuthority(defaultAuthority(profile.role), declared.authority),
+        closedWorld: false,
+        role: profile.role,
+        lifecycle: profile.lifecycle,
+        claimKinds: profile.claimKinds,
+      };
+    }
     return {
       authority: declared.authority,
       closedWorld: declared.closedWorld,
@@ -81,6 +157,13 @@ export function classifyRepositoryFile(
     lifecycle: profile.lifecycle,
     claimKinds: profile.claimKinds,
   };
+}
+
+function lowerAuthority(baseline: CanonAuthority, declared: CanonAuthority): CanonAuthority {
+  const weight: Record<CanonAuthority, number> = {
+    immutable: 6, retcon: 5, canon: 4, production: 3, proposal: 2, reference: 1,
+  };
+  return weight[declared] <= weight[baseline] ? declared : baseline;
 }
 
 function isCanonAuthority(value: string): value is CanonAuthority {
@@ -105,7 +188,12 @@ function isClaimKind(value: unknown): value is ClaimKind {
 }
 
 function defaultAuthority(role: EvidenceRole): CanonAuthority {
-  if (role === "intent" || role === "decision") return "canon";
+  // A repository can call its own README, story bible, contract, or decision
+  // “canon”, but a newly supplied repository is still untrusted input. Intent
+  // and decision paths therefore begin as reference material. Only a route
+  // accepted through the separate `project_approved` trust path may elevate
+  // one of these files to canon, retcon, or immutable authority.
+  if (role === "intent" || role === "decision") return "reference";
   if (["configuration", "implementation", "test", "observation", "asset"].includes(role)) return "production";
   if (role === "proposal" || role === "archive") return "proposal";
   return "reference";

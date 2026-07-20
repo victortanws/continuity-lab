@@ -8,6 +8,17 @@ type ProjectMode = "sample" | "workspace";
 type SourcePanel = "sample" | "upload" | "github" | "mcp";
 type EnginePreference = "demo" | "live";
 type AnalysisMode = "answer_question" | "evaluate_change" | "trace_dependencies";
+type UploadDocumentType = "narrative" | "reference" | "proposal";
+
+type AnalysisReceipt = {
+  question: string;
+  projectId: string;
+  projectMode: ProjectMode;
+  timeScope: string;
+  temporalAxis?: string;
+  storyPosition?: number;
+  targetPosition?: number;
+};
 
 type EvidenceReference = {
   evidenceId: string;
@@ -19,10 +30,25 @@ type EvidenceReference = {
   excerpt?: string;
 };
 
-type EntityReference = { id: string; name: string; type: string; aliases: string[] };
-type DependencyEdge = { from: string; to: string; relation: string; status: string; evidenceIds: string[] };
+type EntityReference = {
+  id: string;
+  name: string;
+  type: string;
+  aliases: string[];
+  resolution: "resolved" | "candidate" | "ambiguous";
+  evidenceIds: string[];
+};
+type DependencyEdge = { from: string; to: string; claimKey: string; claimKind: string; relation: string; status: string; evidenceIds: string[] };
 type Conflict = { type: string; statement: string; severity: string; evidenceIds: string[] };
 type ChangeProposal = { summary: string; assumptions: string[]; requiredChanges: string[]; downstreamRisks: string[] };
+type AnalysisCheckFinding = { check: string; status: "supported" | "conflicted" | "unknown" | "not_applicable"; finding: string; evidenceIds: string[] };
+type RoutingReceipt = {
+  mode?: AnalysisMode;
+  presentationDepth?: "focused" | "full";
+  claimKinds?: string[];
+  diagnostics?: string[];
+  coverage?: { closure?: "closed" | "partial" | "open"; scope?: string };
+};
 
 type UiAnswer = {
   status: string;
@@ -33,22 +59,31 @@ type UiAnswer = {
   confidence: string;
   revision: string;
   scope: string;
+  coverageClosure: "closed" | "partial" | "open";
   evidence: EvidenceReference[];
   entities: EntityReference[];
   dependencies: DependencyEdge[];
   conflicts: Conflict[];
+  checks: AnalysisCheckFinding[];
   blockers: string[];
   path: string[];
   proposal: ChangeProposal | null;
   followUps: string[];
+  depth: "focused" | "full";
 };
 
 type StoredSource = {
   id: string;
   logicalName: string;
   filename: string;
+  originalFilename: string;
+  documentType: UploadDocumentType;
+  role: string;
+  lifecycle: string;
   byteSize: number;
   indexStatus: string;
+  indexError?: string | null;
+  extractionStatus?: string;
   authority: string;
 };
 
@@ -69,20 +104,23 @@ const DEFAULT_QUESTION = "Can the founder pay for the $47,000 operation by Day 2
 const EMPTY_ANSWER: UiAnswer = {
   status: "READY",
   tone: "warning",
-  headline: "Ask a causal question, not just a lookup.",
-  summary: "Continuity Lab retrieves the relevant source fragments, resolves the entities in the question, tests the dependency path, and returns a cited verdict.",
+  headline: "Ask a direct question—or test a consequential change.",
+  summary: "Continuity Lab starts with the smallest safe evidence route. It opens identity, authority, and causal checks only when the question requires them.",
   verdict: "INSUFFICIENT_EVIDENCE",
   confidence: "—",
   revision: "Not traced yet",
   scope: "No evidence has been evaluated yet.",
+  coverageClosure: "open",
   evidence: [],
   entities: [],
   dependencies: [],
   conflicts: [],
+  checks: [],
   blockers: [],
   path: [],
   proposal: null,
   followUps: [],
+  depth: "full",
 };
 
 const EMPTY_REPOSITORY: RepositoryState = {
@@ -118,8 +156,10 @@ export default function Home() {
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [analyzedQuestion, setAnalyzedQuestion] = useState(DEFAULT_QUESTION);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
+  const [analysisReceipt, setAnalysisReceipt] = useState<AnalysisReceipt | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadDocumentType, setUploadDocumentType] = useState<UploadDocumentType>("narrative");
   const [engineMode, setEngineMode] = useState<EngineMode>("ready");
   const [answer, setAnswer] = useState<UiAnswer>(EMPTY_ANSWER);
   const [sources, setSources] = useState<StoredSource[]>([]);
@@ -127,6 +167,7 @@ export default function Home() {
   const [repositoryRef, setRepositoryRef] = useState("");
   const [repository, setRepository] = useState<RepositoryState>(EMPTY_REPOSITORY);
   const [toast, setToast] = useState("");
+  const [showFullTrace, setShowFullTrace] = useState(false);
 
   const activeProjectId = projectMode === "sample" ? SAMPLE_PROJECT_ID : WORKSPACE_PROJECT_ID;
   const workspaceEvidenceCount = sources.length + (repository.fileCount ?? 0);
@@ -135,6 +176,15 @@ export default function Home() {
     : workspaceEvidenceCount
       ? `Live workspace · ${workspaceEvidenceCount} evidence item${workspaceEvidenceCount === 1 ? "" : "s"}`
       : "Live workspace · awaiting sources";
+  const canRunReviewedLive = Boolean(
+    analysisReceipt
+    && analysisReceipt.projectMode === "sample"
+    && analysisReceipt.question === DEFAULT_QUESTION
+    && analysisReceipt.timeScope === "through the current VCS demonstration build"
+    && analysisReceipt.temporalAxis === "day"
+    && analysisReceipt.storyPosition === 8
+    && analysisReceipt.targetPosition === 24,
+  );
 
   const projectStats = useMemo(() => [
     { value: answer.entities.length, label: "entities resolved" },
@@ -189,10 +239,23 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [loadRepositoryStatus, repository.phase]);
 
-  async function analyze(nextQuestion?: string, enginePreference?: EnginePreference) {
-    const value = (nextQuestion ?? question).trim();
+  async function analyze(
+    nextQuestion?: string,
+    enginePreference?: EnginePreference,
+    frozenReceipt?: AnalysisReceipt,
+  ) {
+    const value = (frozenReceipt?.question ?? nextQuestion ?? question).trim();
     if (!value) return;
     const analysis = analysisRequestFor(value);
+    const receipt: AnalysisReceipt = frozenReceipt ?? {
+      question: value,
+      projectId: activeProjectId,
+      projectMode,
+      timeScope: projectMode === "sample"
+        ? "through the current VCS demonstration build"
+        : "the active commit-pinned workspace revision",
+      ...(projectMode === "sample" ? { temporalAxis: "day", storyPosition: 8, targetPosition: inferTargetPosition(value) } : {}),
+    };
     if (nextQuestion) setQuestion(nextQuestion);
     setIsAnalyzing(true);
     try {
@@ -200,30 +263,35 @@ export default function Home() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          projectId: activeProjectId,
+          projectId: receipt.projectId,
           question: value,
           analysisMode: analysis.mode,
           proposedChange: analysis.proposedChange,
-          enginePreference: enginePreference ?? (projectMode === "sample" ? "demo" : "live"),
-          timeScope: projectMode === "sample" ? "through the current VCS demonstration build" : "the active commit-pinned workspace revision",
-          storyPosition: projectMode === "sample" ? 8 : undefined,
+          enginePreference: enginePreference ?? (receipt.projectMode === "sample" ? "demo" : "live"),
+          timeScope: receipt.timeScope,
+          temporalAxis: receipt.temporalAxis,
+          storyPosition: receipt.storyPosition,
+          targetPosition: receipt.targetPosition,
         }),
       });
-      const payload = await response.json() as { mode?: "demonstration" | "gpt-5.6-sol"; answer?: Record<string, unknown>; retrievedEvidence?: Array<Record<string, unknown>>; error?: string; message?: string };
+      const payload = await response.json() as { mode?: "demonstration" | "gpt-5.6-sol"; answer?: Record<string, unknown>; retrievedEvidence?: Array<Record<string, unknown>>; routing?: RoutingReceipt; error?: string; message?: string };
       if (!response.ok || !payload.answer) throw new Error(payload.message ?? payload.error ?? "The continuity service is unavailable.");
-      setAnswer(presentAnswer(payload.answer, payload.retrievedEvidence ?? []));
+      setAnswer(presentAnswer(payload.answer, payload.retrievedEvidence ?? [], payload.routing));
+      setShowFullTrace(false);
       setAnalyzedQuestion(value);
       setHasAnalyzed(true);
+      setAnalysisReceipt(receipt);
       setEngineMode(payload.mode ?? "demonstration");
       window.setTimeout(() => document.getElementById("analysis")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
     } catch (error) {
       setAnalyzedQuestion(value);
       setHasAnalyzed(true);
+      setAnalysisReceipt(receipt);
       setEngineMode("unavailable");
       setAnswer({
         ...EMPTY_ANSWER,
         status: "SETUP NEEDED",
-        headline: projectMode === "workspace" ? "The workspace is stored, but live reasoning is not configured." : "The evidence engine could not complete this trace.",
+        headline: receipt.projectMode === "workspace" ? "The workspace is stored, but live reasoning is not configured." : "The live evidence engine is not configured.",
         summary: `${error instanceof Error ? error.message : "The continuity service is unavailable."} No scripted answer has been substituted.`,
       });
     } finally {
@@ -231,28 +299,51 @@ export default function Home() {
     }
   }
 
-  async function addSource(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  async function storeSourceFiles(files: File[]) {
+    if (!files.length) return false;
     setIsUploading(true);
-    const form = new FormData();
-    form.set("projectId", WORKSPACE_PROJECT_ID);
-    form.set("projectTitle", "Continuity Lab workspace");
-    form.set("authority", "reference");
-    form.set("file", file);
+    const failures: string[] = [];
+    let stored = 0;
+    const ignored = Math.max(0, files.length - 12);
     try {
-      const response = await fetch("/api/continuity/sources", { method: "POST", body: form });
-      const payload = await response.json() as { source?: StoredSource; capability?: string; message?: string; error?: string };
-      if (!response.ok) throw new Error(payload.message ?? payload.error ?? "Upload failed.");
+      for (const file of files.slice(0, 12)) {
+        const form = new FormData();
+        form.set("projectId", WORKSPACE_PROJECT_ID);
+        form.set("projectTitle", "Continuity Lab workspace");
+        form.set("documentType", uploadDocumentType);
+        form.set("file", file);
+        const response = await fetch("/api/continuity/sources", { method: "POST", body: form });
+        const payload = await response.json() as { source?: StoredSource; capability?: string; message?: string; error?: string };
+        if (!response.ok) {
+          failures.push(`${file.name}: ${payload.message ?? payload.error ?? "upload failed"}`);
+          continue;
+        }
+        stored += 1;
+      }
       await loadSources();
-      setProjectMode("workspace");
-      showToast(`${file.name} stored · ${String(payload.capability ?? payload.source?.indexStatus ?? "stored").replaceAll("_", " ")}`);
+      if (stored) setProjectMode("workspace");
+      showToast(failures.length
+        ? `${stored} stored · ${failures.length} rejected${ignored ? ` · ${ignored} beyond the 12-file limit` : ""}: ${failures[0]}`
+        : `${stored} source${stored === 1 ? "" : "s"} stored as ${uploadDocumentType} evidence${ignored ? ` · ${ignored} beyond the 12-file limit were not sent` : ""}`);
+      return stored > 0;
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Upload failed.");
+      return false;
     } finally {
       setIsUploading(false);
-      event.target.value = "";
     }
+  }
+
+  async function addSource(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    await storeSourceFiles(files);
+  }
+
+  async function addPastedSource(text: string) {
+    const normalized = text.trim();
+    if (!normalized) return false;
+    return storeSourceFiles([new File([normalized], `pasted-source-${Date.now()}.txt`, { type: "text/plain" })]);
   }
 
   async function syncRepository(event: FormEvent<HTMLFormElement>) {
@@ -327,11 +418,11 @@ export default function Home() {
               <button className={projectMode === "sample" ? "active" : ""} onClick={() => setProjectMode("sample")}><span/> Try the VCS sample</button>
               <button className={projectMode === "workspace" ? "active" : ""} onClick={() => setProjectMode("workspace")}><span/> Use my workspace</button>
             </div>
-            <label htmlFor="continuity-question">Ask what must be true—or what a change would break</label>
+            <label htmlFor="continuity-question">Ask what is true—or what a change would break</label>
             <textarea id="continuity-question" value={question} onChange={(event) => setQuestion(event.target.value)} />
             <div className="question-footer">
               <div className={`engine-badge ${engineMode}`}><span/>{engineLabel(engineMode, projectMode)}</div>
-              <button className="primary-button" onClick={() => void analyze()} disabled={isAnalyzing || !question.trim()}>{isAnalyzing ? <span className="spinner"/> : <Icon name="arrow" size={18}/>} {isAnalyzing ? "Tracing evidence…" : "Trace consequences"}</button>
+              <button className="primary-button" onClick={() => void analyze()} disabled={isAnalyzing || !question.trim()}>{isAnalyzing ? <span className="spinner"/> : <Icon name="arrow" size={18}/>} {isAnalyzing ? "Checking evidence…" : "Ask"}</button>
             </div>
           </div>
 
@@ -359,7 +450,7 @@ export default function Home() {
               <SamplePanel onUse={() => { setProjectMode("sample"); setQuestion(DEFAULT_QUESTION); showToast("VCS sample selected"); }}/>
             )}
             {sourcePanel === "upload" && (
-              <UploadPanel sources={sources} isUploading={isUploading} onChange={addSource}/>
+              <UploadPanel sources={sources} isUploading={isUploading} documentType={uploadDocumentType} setDocumentType={setUploadDocumentType} onChange={addSource} onPaste={addPastedSource}/>
             )}
             {sourcePanel === "github" && (
               <GitHubPanel repository={repository} repositoryUrl={repositoryUrl} repositoryRef={repositoryRef} setRepositoryUrl={setRepositoryUrl} setRepositoryRef={setRepositoryRef} onSubmit={syncRepository}/>
@@ -375,42 +466,53 @@ export default function Home() {
           <span className={`verdict ${answer.tone}`}><span/>{answer.status}</span>
         </div>
 
-        {engineMode === "demonstration" && <div className="honesty-banner"><strong>Validated sample mode</strong><span>This answer uses the reviewed VCS fallback. The live control reruns this exact question through the configured OpenAI API path.</span><button className="live-test-icon" aria-label="Run this exact question live with the OpenAI API" onClick={() => void analyze(undefined, "live")} disabled={isAnalyzing}><Icon name="code" size={17}/></button></div>}
-        {engineMode === "unavailable" && <div className="honesty-banner attention"><strong>Live setup incomplete</strong><span>The workspace remains stored safely. Add the OpenAI API key in Site settings to index it and activate GPT-5.6 retrieval.</span></div>}
+        {engineMode === "demonstration" && <div className="honesty-banner"><strong>Validated sample mode</strong><span>{canRunReviewedLive ? "This answer uses the reviewed VCS fallback. The icon reruns this exact frozen receipt through the configured OpenAI API path." : "This answer uses the reviewed VCS fallback. Live API execution is exposed only for the frozen demonstration question."}</span>{canRunReviewedLive && <button className="live-test-icon" aria-label="Run this exact question live with the OpenAI API" onClick={() => void analyze(undefined, "live", analysisReceipt ?? undefined)} disabled={isAnalyzing}><Icon name="code" size={17}/></button>}</div>}
+        {engineMode === "unavailable" && <div className="honesty-banner attention"><strong>Live setup incomplete</strong><span>{analysisReceipt?.projectMode === "sample" ? "Add the OpenAI API key in Site settings to run this reviewed sample through GPT-5.6; the sample does not require repository indexing." : "The workspace remains stored safely. Add the OpenAI API key in Site settings to index it and activate GPT-5.6 retrieval."}</span></div>}
 
         <div className="answer-grid">
           <article className="answer-card primary-answer">
-            <div className="answer-meta"><span>{answer.verdict.replaceAll("_", " ")}</span><span>{answer.confidence} confidence</span><span>{shortRevision(answer.revision)}</span></div>
+            <div className="answer-meta"><span>{answer.verdict.replaceAll("_", " ")}</span><span>{answer.confidence} confidence</span><span>{answer.coverageClosure} coverage</span><span>{shortRevision(answer.revision)}</span></div>
             <h3>{answer.headline}</h3>
             <p>{answer.summary}</p>
           </article>
-          <div className="stat-grid">{projectStats.map((stat) => <div key={stat.label}><strong>{stat.value}</strong><span>{stat.label}</span></div>)}</div>
+          {answer.depth === "full" || showFullTrace
+            ? <div className="stat-grid">{projectStats.map((stat) => <div key={stat.label}><strong>{stat.value}</strong><span>{stat.label}</span></div>)}</div>
+            : <div className="focused-route"><strong>Focused answer</strong><span>{answer.evidence.length} decisive source{answer.evidence.length === 1 ? "" : "s"}</span></div>}
         </div>
 
-        <div className="inspection-grid">
-          <article className="instrument-card dependency-card">
-            <div className="card-heading"><div><span>CAUSAL SLICE</span><h3>What depends on what</h3></div><small>{answer.dependencies.length || answer.path.length} relation{(answer.dependencies.length || answer.path.length) === 1 ? "" : "s"}</small></div>
-            <DependencyView dependencies={answer.dependencies} path={answer.path}/>
-            {answer.blockers.length > 0 && <div className="blocker-list"><strong>Blockers</strong>{answer.blockers.map((item) => <p key={item}><span>!</span>{item}</p>)}</div>}
+        {answer.depth === "focused" && !showFullTrace ? (
+          <article className="focused-answer-trace">
+            <div><span>DECISIVE CONTEXT</span><strong>{answer.entities.slice(0, 4).map((entity) => entity.name).join(" · ") || "No entity was confidently resolved"}</strong><small>{answer.evidence.slice(0, 3).map((item) => item.title || item.sourceId).join(" · ") || "No admissible citation was found"}</small></div>
+            <button type="button" onClick={() => setShowFullTrace(true)}>Show evidence trace <Icon name="arrow" size={14}/></button>
           </article>
+        ) : <>
+          <div className="inspection-grid">
+            <article className="instrument-card dependency-card">
+              <div className="card-heading"><div><span>CAUSAL SLICE</span><h3>What depends on what</h3></div><small>{answer.dependencies.length || answer.path.length} relation{(answer.dependencies.length || answer.path.length) === 1 ? "" : "s"}</small></div>
+              <DependencyView dependencies={answer.dependencies} path={answer.path}/>
+              {answer.blockers.length > 0 && <div className="blocker-list"><strong>Blockers</strong>{answer.blockers.map((item) => <p key={item}><span>!</span>{item}</p>)}</div>}
+            </article>
 
-          <article className="instrument-card entity-card">
-            <div className="card-heading"><div><span>ENTITY RESOLUTION</span><h3>Who and what the answer means</h3></div><small>question-scoped</small></div>
-            <div className="entity-list">{answer.entities.length ? answer.entities.map((entity) => <div key={entity.id}><span>{entity.type}</span><strong>{entity.name}</strong><small>{entity.id}{entity.aliases.length ? ` · ${entity.aliases.slice(0, 2).join(", ")}` : ""}</small></div>) : <EmptyState copy="Run a trace to resolve the entities relevant to this question."/>}</div>
-          </article>
-        </div>
+            <article className="instrument-card entity-card">
+              <div className="card-heading"><div><span>ENTITY RESOLUTION</span><h3>Who and what the answer means</h3></div><small>question-scoped</small></div>
+              <div className="entity-list">{answer.entities.length ? answer.entities.map((entity) => <div key={entity.id}><span>{entity.type} · {entity.resolution}</span><strong>{entity.name}</strong><small>{entity.id}{entity.aliases.length ? ` · ${entity.aliases.slice(0, 2).join(", ")}` : ""} · {entity.evidenceIds.length} source{entity.evidenceIds.length === 1 ? "" : "s"}</small></div>) : <EmptyState copy="Run a trace to resolve the entities relevant to this question."/>}</div>
+            </article>
+          </div>
 
-        <div className="inspection-grid lower">
-          <article className="instrument-card evidence-card">
-            <div className="card-heading"><div><span>PROVENANCE</span><h3>Evidence you can inspect</h3></div><small>{answer.scope}</small></div>
-            <div className="evidence-list">{answer.evidence.length ? answer.evidence.map((item) => <details key={item.evidenceId}><summary><span className={`stance ${item.stance}`}>{item.stance}</span><span><strong>{item.title || item.sourceId}</strong><code>{item.locator}</code></span><Icon name="arrow" size={14}/></summary><div className="evidence-detail"><p>{item.supports}</p>{item.excerpt && <blockquote>{item.excerpt}</blockquote>}</div></details>) : <EmptyState copy="Every factual verdict will appear here with its source and locator."/>}</div>
-          </article>
+          <div className="inspection-grid lower">
+            <article className="instrument-card evidence-card">
+              <div className="card-heading"><div><span>PROVENANCE</span><h3>Evidence you can inspect</h3></div><small>{answer.scope}</small></div>
+              <div className="evidence-list">{answer.evidence.length ? answer.evidence.map((item) => <details key={item.evidenceId}><summary><span className={`stance ${item.stance}`}>{item.stance}</span><span><strong>{item.title || item.sourceId}</strong><code>{item.locator}</code></span><Icon name="arrow" size={14}/></summary><div className="evidence-detail"><p>{item.supports}</p>{item.excerpt && <blockquote>{item.excerpt}</blockquote>}</div></details>) : <EmptyState copy="Every factual verdict will appear here with its source and locator."/>}</div>
+            </article>
 
-          <article className="instrument-card repair-card">
-            <div className="card-heading"><div><span>MINIMAL REPAIR</span><h3>Turn diagnosis into work</h3></div></div>
-            {answer.proposal ? <><p className="proposal-summary">{answer.proposal.summary}</p><div className="repair-list">{answer.proposal.requiredChanges.map((item, index) => <div key={item}><span>{String(index + 1).padStart(2, "0")}</span><p>{item}</p></div>)}</div>{answer.proposal.downstreamRisks.length > 0 && <details><summary>Downstream risks</summary>{answer.proposal.downstreamRisks.map((risk) => <p key={risk}>{risk}</p>)}</details>}</> : <EmptyState copy="When a change is possible, the engine returns assumptions, affected work, and downstream risks without silently promoting the proposal to canon."/>}
-          </article>
-        </div>
+            <article className="instrument-card repair-card">
+              <div className="card-heading"><div><span>MINIMAL REPAIR</span><h3>Turn diagnosis into work</h3></div></div>
+              {answer.proposal ? <><p className="proposal-summary">{answer.proposal.summary}</p><div className="repair-list">{answer.proposal.requiredChanges.map((item, index) => <div key={item}><span>{String(index + 1).padStart(2, "0")}</span><p>{item}</p></div>)}</div>{answer.proposal.downstreamRisks.length > 0 && <details><summary>Downstream risks</summary>{answer.proposal.downstreamRisks.map((risk) => <p key={risk}>{risk}</p>)}</details>}</> : <EmptyState copy="When a change is possible, the engine returns assumptions, affected work, and downstream risks without silently promoting the proposal to canon."/>}
+            </article>
+          </div>
+
+          {answer.checks.length > 0 && <article className="closure-audit"><div className="card-heading"><div><span>SEMANTIC CLOSURE</span><h3>Every routed check has an explicit result</h3></div><small>{answer.checks.filter((item) => item.status === "unknown").length} unknown</small></div><div className="closure-grid">{answer.checks.map((item) => <div key={item.check} className={item.status}><span>{item.status.replaceAll("_", " ")}</span><strong>{item.check.replaceAll("_", " ")}</strong><p>{item.finding}</p></div>)}</div></article>}
+        </>}
 
         {answer.conflicts.length > 0 && <div className="conflict-strip"><strong>{answer.conflicts.length} conflict{answer.conflicts.length === 1 ? "" : "s"} found</strong>{answer.conflicts.map((conflict) => <p key={`${conflict.type}-${conflict.statement}`}><span>{conflict.severity}</span>{conflict.statement}</p>)}</div>}
         {answer.followUps.length > 0 && <div className="follow-ups"><span>Keep testing</span>{answer.followUps.slice(0, 3).map((item) => <button key={item} onClick={() => void analyze(item)}>{item}<Icon name="arrow" size={14}/></button>)}</div>}
@@ -431,8 +533,14 @@ function SamplePanel({ onUse }: { onUse: () => void }) {
   return <div className="sample-panel"><div className="source-symbol coral"><Icon name="branch" size={23}/></div><div><span className="panel-kicker">REVIEWED EXAMPLE</span><h3>VibeCode Simulator</h3><p>A deliberately small evidence pack for testing identity, reachability, trigger gaps, and counterfactual cost changes before connecting the real repository.</p><div className="sample-tags"><span>story contract</span><span>economy</span><span>runtime triggers</span><span>tests</span></div></div><button className="outline-button" onClick={onUse}>Use sample <Icon name="arrow" size={16}/></button></div>;
 }
 
-function UploadPanel({ sources, isUploading, onChange }: { sources: StoredSource[]; isUploading: boolean; onChange: (event: ChangeEvent<HTMLInputElement>) => void }) {
-  return <div className="upload-panel"><label className="upload-drop"><input type="file" accept=".txt,.md,.markdown,.json,.pdf,.docx,.html" onChange={(event) => void onChange(event)}/><span className="source-symbol blue"><Icon name="upload" size={23}/></span><strong>{isUploading ? "Storing and indexing…" : "Upload a source"}</strong><p>Story bible, script, design document, PDF, JSON, or Gutenberg text · up to 20 MB</p><small>The original is hashed and versioned. Stored and indexed are shown as different states.</small></label><div className="uploaded-list"><div className="panel-heading"><span>WORKSPACE SOURCES</span><strong>{sources.length}</strong></div>{sources.length ? sources.slice(0, 5).map((source) => <div key={source.id}><Icon name="file" size={17}/><span><strong>{source.logicalName || source.filename}</strong><small>{formatBytes(source.byteSize)} · {source.authority}</small></span><em className={source.indexStatus}>{source.indexStatus.replaceAll("_", " ")}</em></div>) : <EmptyState copy="Your uploaded evidence will appear here with its real storage and index status."/>}</div></div>;
+function UploadPanel({ sources, isUploading, documentType, setDocumentType, onChange, onPaste }: { sources: StoredSource[]; isUploading: boolean; documentType: UploadDocumentType; setDocumentType: (value: UploadDocumentType) => void; onChange: (event: ChangeEvent<HTMLInputElement>) => void; onPaste: (text: string) => Promise<boolean> }) {
+  const [pastedText, setPastedText] = useState("");
+  const typeExplanation = documentType === "narrative"
+    ? "Characters, events, rules, and intended causal structure. This is still reference-authority evidence, not approved canon."
+    : documentType === "proposal"
+      ? "A possible future, revision, or experiment. It stays proposed and cannot silently become current truth."
+      : "Background, research, commentary, or historical material used primarily for identity and context.";
+  return <div className="upload-panel"><div className="upload-input-column"><label className="upload-classifier"><span>How should this document be read?</span><select value={documentType} disabled={isUploading} onChange={(event) => setDocumentType(event.target.value as UploadDocumentType)}><option value="narrative">Story or source text</option><option value="reference">Reference material</option><option value="proposal">Draft or proposal</option></select><small>{typeExplanation}</small></label><label className="upload-drop"><input type="file" multiple accept=".txt,.md,.markdown,.json,.yaml,.yml,.xml,.csv,.tsv,.pdf,.doc,.docx,.html,.htm,.pptx" onChange={(event) => void onChange(event)}/><span className="source-symbol blue"><Icon name="upload" size={23}/></span><strong>{isUploading ? "Storing and indexing…" : "Upload up to 12 sources"}</strong><p>TXT, Markdown, JSON, YAML, XML, CSV/TSV, HTML · operator preview: searchable PDF, DOC/DOCX, PPTX · 20 MB each</p><small>PDF/Office upload is allowlisted because its contents are not yet credential-scanned. XLSX, images, scanned/OCR-only PDFs, EPUB, and RTF need a dedicated extractor.</small></label><div className="paste-source"><textarea value={pastedText} onChange={(event) => setPastedText(event.target.value)} placeholder="Or paste a story, summary, cast list, ID table, or notes…"/><button type="button" disabled={isUploading || !pastedText.trim()} onClick={() => void onPaste(pastedText).then((stored) => { if (stored) setPastedText(""); })}>Store pasted text</button></div></div><div className="uploaded-list"><div className="panel-heading"><span>WORKSPACE SOURCES</span><strong>{sources.length}</strong></div>{sources.length ? sources.slice(0, 5).map((source) => <div key={source.id} title={source.indexError || "Provider indexing does not independently verify complete extraction."}><Icon name="file" size={17}/><span><strong>{source.logicalName || source.originalFilename || source.filename}</strong><small>{formatBytes(source.byteSize)} · {source.documentType} · {source.authority} · {(source.extractionStatus ?? "not_yet_verified").replaceAll("_", " ")}</small></span><em className={source.indexStatus}>{source.indexStatus.replaceAll("_", " ")}</em></div>) : <EmptyState copy="Each source will show storage/index status. Indexed means searchable by the provider; it does not prove that every page or entity was extracted."/>}</div></div>;
 }
 
 function GitHubPanel({ repository, repositoryUrl, repositoryRef, setRepositoryUrl, setRepositoryRef, onSubmit }: { repository: RepositoryState; repositoryUrl: string; repositoryRef: string; setRepositoryUrl: (value: string) => void; setRepositoryRef: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
@@ -440,11 +548,11 @@ function GitHubPanel({ repository, repositoryUrl, repositoryRef, setRepositoryUr
 }
 
 function McpPanel() {
-  return <div className="mcp-panel"><div><div className="source-symbol ink"><Icon name="code" size={23}/></div><span className="panel-kicker">ONE CORE, MORE THAN ONE SURFACE</span><h3>Use the same pinned evidence from ChatGPT, Codex, or an editor.</h3><p>The MCP layer should expose read-only search and fetch primitives plus continuity-specific analysis tools. Repository synchronization remains an explicit authenticated operation; questions never trigger a surprise GitHub pull.</p></div><div className="mcp-contract"><span>REMOTE MCP CONTRACT</span><code>search(query, project_revision)</code><code>fetch(source_id, locator)</code><code>answer_question(question)</code><code>trace_dependencies(target)</code><code>analyze_change(proposal)</code><small>Contract designed · remote transport and authentication are the next deployment boundary.</small></div></div>;
+  return <div className="mcp-panel"><div><div className="source-symbol ink"><Icon name="code" size={23}/></div><span className="panel-kicker">ONE CORE, MORE THAN ONE SURFACE</span><h3>Use the reviewed sample from ChatGPT, Codex, or another MCP client.</h3><p>The stateless <code>/mcp</code> transport exposes three read-only analysis tools over the immutable VCS demonstration. It never synchronizes GitHub or calls a paid provider. Private workspaces remain disabled until connector authentication and tenant scoping are implemented.</p></div><div className="mcp-contract"><span>REVIEWED SAMPLE MCP</span><code>answer_question(question)</code><code>trace_dependencies(target)</code><code>analyze_change(proposal)</code><small>Executable sample transport · pinned to vcs-demo-r1 · authenticated private workspace transport is next.</small></div></div>;
 }
 
 function DependencyView({ dependencies, path }: { dependencies: DependencyEdge[]; path: string[] }) {
-  if (dependencies.length) return <div className="dependency-list">{dependencies.slice(0, 7).map((edge, index) => <div key={`${edge.from}-${edge.to}-${index}`} className={edge.status}><strong>{edge.from}</strong><span><i/>{edge.relation}</span><strong>{edge.to}</strong><em>{edge.status}</em></div>)}</div>;
+  if (dependencies.length) return <div className="dependency-list">{dependencies.slice(0, 7).map((edge, index) => <div key={`${edge.from}-${edge.to}-${index}`} className={edge.status}><strong>{edge.from}</strong><span title={`${edge.claimKind} · ${edge.claimKey}`}><i/>{edge.relation}</span><strong>{edge.to}</strong><em>{edge.claimKind} · {edge.status}</em></div>)}</div>;
   if (path.length) return <div className="path-list">{path.map((item, index) => <div key={`${item}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{item}</p></div>)}</div>;
   return <EmptyState copy="A dependency slice will appear here instead of a generic graph hairball."/>;
 }
@@ -454,13 +562,13 @@ function EmptyState({ copy }: { copy: string }) {
 }
 
 function engineLabel(mode: EngineMode, projectMode: ProjectMode) {
-  if (mode === "gpt-5.6-sol") return "GPT-5.6 Sol · live evidence";
+  if (mode === "gpt-5.6-sol") return "GPT-5.6 Sol · live reasoning";
   if (mode === "demonstration") return "Reviewed VCS sample";
   if (mode === "unavailable") return "Live reasoning needs setup";
   return projectMode === "sample" ? "VCS sample ready" : "Workspace selected";
 }
 
-function presentAnswer(raw: Record<string, unknown>, retrievedEvidence: Array<Record<string, unknown>> = []): UiAnswer {
+function presentAnswer(raw: Record<string, unknown>, retrievedEvidence: Array<Record<string, unknown>> = [], routing?: RoutingReceipt): UiAnswer {
   const verdict = isVerdict(raw.verdict) ? raw.verdict : "INSUFFICIENT_EVIDENCE";
   const reachability = asRecord(raw.reachability) ?? {};
   const retrievedById = new Map(retrievedEvidence.map((item) => [stringValue(item.id, ""), item]));
@@ -474,9 +582,22 @@ function presentAnswer(raw: Record<string, unknown>, retrievedEvidence: Array<Re
       excerpt: retrieved ? stringValue(retrieved.text, "") : undefined,
     };
   });
-  const entities = arrayOfRecords(raw.entities).map((item) => ({ id: stringValue(item.id, "unknown"), name: stringValue(item.name, "Unnamed entity"), type: stringValue(item.type, "entity"), aliases: stringArray(item.aliases) }));
-  const dependencies = arrayOfRecords(raw.dependencies).map((item) => ({ from: stringValue(item.from, "Unknown source"), to: stringValue(item.to, "Unknown target"), relation: stringValue(item.relation, "relates to"), status: stringValue(item.status, "proposed"), evidenceIds: stringArray(item.evidenceIds) }));
+  const entities = arrayOfRecords(raw.entities).map((item) => ({
+    id: stringValue(item.id, "unknown"),
+    name: stringValue(item.name, "Unnamed entity"),
+    type: stringValue(item.type, "entity"),
+    aliases: stringArray(item.aliases),
+    resolution: ["resolved", "candidate", "ambiguous"].includes(String(item.resolution)) ? item.resolution as EntityReference["resolution"] : "candidate",
+    evidenceIds: stringArray(item.evidenceIds),
+  }));
+  const dependencies = arrayOfRecords(raw.dependencies).map((item) => ({ from: stringValue(item.from, "Unknown source"), to: stringValue(item.to, "Unknown target"), claimKey: stringValue(item.claimKey, "unscoped"), claimKind: stringValue(item.claimKind, "causal"), relation: stringValue(item.relation, "relates to"), status: stringValue(item.status, "proposed"), evidenceIds: stringArray(item.evidenceIds) }));
   const conflicts = arrayOfRecords(raw.conflicts).map((item) => ({ type: stringValue(item.type, "conflict"), statement: stringValue(item.statement, "Conflicting evidence found."), severity: stringValue(item.severity, "medium"), evidenceIds: stringArray(item.evidenceIds) }));
+  const checks = arrayOfRecords(raw.analysisChecks).map((item) => ({
+    check: stringValue(item.check, "verification_and_unknowns"),
+    status: ["supported", "conflicted", "unknown", "not_applicable"].includes(String(item.status)) ? item.status as AnalysisCheckFinding["status"] : "unknown",
+    finding: stringValue(item.finding, "This dimension was not resolved."),
+    evidenceIds: stringArray(item.evidenceIds),
+  }));
   const proposalRaw = asRecord(raw.proposal);
   const proposal = proposalRaw ? { summary: stringValue(proposalRaw.summary, "Proposed repair"), assumptions: stringArray(proposalRaw.assumptions), requiredChanges: stringArray(proposalRaw.requiredChanges), downstreamRisks: stringArray(proposalRaw.downstreamRisks) } : null;
   const status = verdict === "INSUFFICIENT_EVIDENCE" ? "EVIDENCE GAP" : verdict.replaceAll("_", " ");
@@ -484,10 +605,13 @@ function presentAnswer(raw: Record<string, unknown>, retrievedEvidence: Array<Re
   const headlines: Record<Verdict, string> = {
     SUPPORTED: "The current evidence supports this conclusion.", CONFLICT: "The active project evidence disagrees.", AMBIGUOUS: "The question resolves to more than one meaning.", UNREACHABLE: "The promise exists; its completion path does not.", INSUFFICIENT_EVIDENCE: "The available evidence cannot support a confident answer yet.", PROPOSAL: "The change is possible, but it has a dependency cost.",
   };
+  const depth: UiAnswer["depth"] = routing?.presentationDepth === "focused" ? "focused" : "full";
   return {
     status, tone, headline: headlines[verdict], summary: stringValue(raw.answer, "No answer was returned."), verdict,
-    confidence: stringValue(raw.confidence, "unknown"), revision: stringValue(raw.projectRevision, "unversioned"), scope: stringValue(reachability.completenessScope, "Retrieved evidence only"),
-    evidence, entities, dependencies, conflicts, blockers: stringArray(reachability.blockers), path: stringArray(reachability.path), proposal, followUps: stringArray(raw.followUpQuestions),
+    confidence: stringValue(raw.confidence, "unknown"), revision: stringValue(raw.projectRevision, "unversioned"),
+    scope: stringValue(routing?.coverage?.scope, stringValue(reachability.completenessScope, "Retrieved evidence only")),
+    coverageClosure: routing?.coverage?.closure ?? "open",
+    evidence, entities, dependencies, conflicts, checks, blockers: stringArray(reachability.blockers), path: stringArray(reachability.path), proposal, followUps: stringArray(raw.followUpQuestions), depth,
   };
 }
 
@@ -499,7 +623,13 @@ function presentRepository(payload: Record<string, unknown>): RepositoryState | 
   const repository = firstString(records, ["repositoryUrl", "htmlUrl", "url", "repository", "fullName"]);
   const commit = firstString(records, ["commitSha", "commit", "sha", "snapshotId"]);
   if (!repository && !commit) return null;
-  const rawStatus = firstString(records, ["indexStatus", "status", "syncStatus"])?.toLowerCase() ?? "ready";
+  const statusRecords = [
+    asRecord(payload.snapshot),
+    newest ? asRecord(newest.snapshot) : null,
+    payload,
+    asRecord(payload.connection),
+  ].filter(Boolean) as Record<string, unknown>[];
+  const rawStatus = firstString(statusRecords, ["indexStatus", "status", "syncStatus"])?.toLowerCase() ?? "ready";
   const phase: RepositoryState["phase"] = rawStatus.includes("fail") || rawStatus.includes("error") ? "attention" : rawStatus.includes("indexing") || rawStatus.includes("pending") || rawStatus.includes("sync") ? "syncing" : "ready";
   return {
     phase, repository: repository ?? "Connected repository", ref: firstString(records, ["requestedRef", "ref", "branch", "tag"]) ?? "Default branch", commit: commit ?? "Pinned snapshot",
@@ -527,4 +657,11 @@ function analysisRequestFor(question: string): { mode: AnalysisMode; proposedCha
   if (evaluatesChange) return { mode: "evaluate_change", proposedChange: question };
   const tracesDependencies = /\bmust happen\b|\bdepend(?:s|encies)?\b|\bprerequisite\b|\btrigger\b|\bproducer\b|\breach(?:able|ability)?\b|\bcan .+ (?:pay|reach|unlock|occur|happen)\b/.test(normalized);
   return { mode: tracesDependencies ? "trace_dependencies" : "answer_question", proposedChange: null };
+}
+
+function inferTargetPosition(question: string): number | undefined {
+  const value = question.match(/\b(?:by|through|before|until)\s+(?:day|chapter|ch|beat|scene|turn|episode|ep|step)[\s_:#-]*(\d+(?:\.\d+)?)\b/i)?.[1];
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

@@ -1,6 +1,7 @@
 /**
- * Transport-neutral contract for a future Continuity Lab MCP server.
- * Provider identifiers never appear in these public resources or tool inputs.
+ * Transport-neutral contract shared by the reviewed-sample MCP transport and
+ * future authenticated workspace transports. Provider identifiers never
+ * appear in these public resources or tool inputs.
  */
 export const continuityResources = {
   revision: (projectId: string, revisionId: string) =>
@@ -19,10 +20,11 @@ export const continuityResources = {
 const projectRevisionInput = {
   type: "object",
   additionalProperties: false,
+  maxProperties: 5,
   required: ["projectId", "projectRevision"],
   properties: {
-    projectId: { type: "string", minLength: 1 },
-    projectRevision: { type: "string", minLength: 1 },
+    projectId: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    projectRevision: { type: "string", minLength: 1, maxLength: 128 },
   },
 } as const;
 
@@ -32,7 +34,7 @@ export const continuityMcpTools = {
     inputSchema: {
       ...projectRevisionInput,
       required: [...projectRevisionInput.required, "query"],
-      properties: { ...projectRevisionInput.properties, query: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 50 } },
+      properties: { ...projectRevisionInput.properties, query: { type: "string", minLength: 1, maxLength: 8_000 }, limit: { type: "integer", minimum: 1, maximum: 50 } },
     },
   },
   fetch: {
@@ -42,8 +44,8 @@ export const continuityMcpTools = {
       required: [...projectRevisionInput.required, "sourceId"],
       properties: {
         ...projectRevisionInput.properties,
-        sourceId: { type: "string", minLength: 1 },
-        locator: { type: "string", minLength: 1 },
+        sourceId: { type: "string", minLength: 1, maxLength: 128 },
+        locator: { type: "string", minLength: 1, maxLength: 240 },
       },
     },
   },
@@ -54,8 +56,8 @@ export const continuityMcpTools = {
       additionalProperties: false,
       required: ["projectId"],
       properties: {
-        projectId: { type: "string", minLength: 1 },
-        snapshotId: { type: "string", minLength: 1 },
+        projectId: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+        snapshotId: { type: "string", minLength: 1, maxLength: 128 },
       },
     },
   },
@@ -64,7 +66,7 @@ export const continuityMcpTools = {
     inputSchema: {
       ...projectRevisionInput,
       required: [...projectRevisionInput.required, "query"],
-      properties: { ...projectRevisionInput.properties, query: { type: "string", minLength: 1 }, limit: { type: "integer", minimum: 1, maximum: 50 } },
+      properties: { ...projectRevisionInput.properties, query: { type: "string", minLength: 1, maxLength: 8_000 }, limit: { type: "integer", minimum: 1, maximum: 50 } },
     },
   },
   continuity_answer_question: {
@@ -74,9 +76,9 @@ export const continuityMcpTools = {
       required: [...projectRevisionInput.required, "question"],
       properties: {
         ...projectRevisionInput.properties,
-        question: { type: "string", minLength: 1 },
-        timeScope: { type: ["string", "null"] },
-        contextRefs: { type: "array", items: { type: "string" }, maxItems: 20 },
+        question: { type: "string", minLength: 1, maxLength: 8_000 },
+        timeScope: { type: ["string", "null"], maxLength: 240 },
+        contextRefs: { type: "array", items: { type: "string", minLength: 1, maxLength: 240 }, maxItems: 20, uniqueItems: true },
       },
     },
   },
@@ -85,7 +87,7 @@ export const continuityMcpTools = {
     inputSchema: {
       ...projectRevisionInput,
       required: [...projectRevisionInput.required, "targetRef"],
-      properties: { ...projectRevisionInput.properties, targetRef: { type: "string", minLength: 1 }, timeScope: { type: ["string", "null"] } },
+      properties: { ...projectRevisionInput.properties, targetRef: { type: "string", minLength: 1, maxLength: 8_000 }, timeScope: { type: ["string", "null"], maxLength: 240 } },
     },
   },
   continuity_analyze_change: {
@@ -93,7 +95,7 @@ export const continuityMcpTools = {
     inputSchema: {
       ...projectRevisionInput,
       required: [...projectRevisionInput.required, "change"],
-      properties: { ...projectRevisionInput.properties, change: { type: "string", minLength: 1 }, contextRefs: { type: "array", items: { type: "string" } } },
+      properties: { ...projectRevisionInput.properties, change: { type: "string", minLength: 1, maxLength: 8_000 }, contextRefs: { type: "array", items: { type: "string", minLength: 1, maxLength: 240 }, maxItems: 20, uniqueItems: true } },
     },
   },
 } as const;

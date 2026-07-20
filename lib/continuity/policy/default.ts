@@ -1,14 +1,79 @@
 import type {
   AuthorityPolicy,
+  CitationUse,
   ClaimKind,
   EvidenceChunk,
   EvidenceLifecycle,
   EvidenceRole,
 } from "../contracts";
 
+const contextualize: CitationUse[] = ["contextualize"];
+const propose: CitationUse[] = ["propose", "contextualize"];
+const establish: CitationUse[] = ["establish", "corroborate", "challenge", "contextualize"];
+const everyClaimKind = ["identity", "normative", "configured", "implemented", "tested", "observed", "causal", "historical"] as const;
+
+const DEFAULT_ALLOWED_USES: AuthorityPolicy["allowedUsesByRole"] = {
+  intent: {
+    identity: ["establish", "corroborate", "challenge"],
+    normative: ["establish", "corroborate", "challenge"],
+    causal: contextualize,
+  },
+  decision: {
+    identity: ["establish", "corroborate", "challenge"],
+    normative: ["establish", "corroborate", "challenge"],
+    causal: contextualize,
+  },
+  configuration: {
+    configured: ["establish", "corroborate", "challenge"],
+    implemented: ["corroborate", "challenge", "contextualize"],
+    causal: contextualize,
+  },
+  implementation: {
+    identity: ["establish", "corroborate", "challenge"],
+    implemented: ["establish", "corroborate", "challenge"],
+    configured: ["corroborate", "challenge", "contextualize"],
+    causal: ["establish", "corroborate", "challenge"],
+  },
+  test: {
+    tested: ["establish", "corroborate", "challenge"],
+    configured: ["corroborate", "challenge", "contextualize"],
+    implemented: ["corroborate", "challenge", "contextualize"],
+    causal: ["corroborate", "challenge", "contextualize"],
+  },
+  observation: {
+    observed: ["establish", "corroborate", "challenge"],
+    historical: ["establish", "corroborate", "challenge"],
+    configured: ["corroborate", "challenge", "contextualize"],
+    implemented: ["corroborate", "challenge", "contextualize"],
+    causal: ["corroborate", "challenge", "contextualize"],
+  },
+  proposal: {
+    identity: propose, normative: propose, configured: propose, implemented: propose,
+    tested: propose, observed: propose, causal: propose, historical: propose,
+  },
+  archive: {
+    identity: contextualize, normative: contextualize, configured: contextualize,
+    implemented: contextualize, tested: contextualize, observed: contextualize,
+    causal: contextualize, historical: ["establish", "corroborate", "challenge", "contextualize"],
+  },
+  asset: {
+    identity: ["establish", "corroborate", "challenge", "contextualize"],
+    implemented: ["establish", "corroborate", "challenge"],
+  },
+  reference: {
+    identity: ["establish", "corroborate", "challenge", "contextualize"],
+    historical: ["establish", "corroborate", "challenge", "contextualize"],
+    normative: contextualize, configured: contextualize, implemented: contextualize,
+    tested: contextualize, observed: contextualize, causal: contextualize,
+  },
+  evaluation: {},
+};
+
 const DEFAULT_RULES: AuthorityPolicy["sourceRules"] = [
   { id: "evaluation", pathPattern: "**/{eval,evals,evaluation,evaluations,benchmark,benchmarks}/**", role: "evaluation" },
   { id: "gold-or-rubric", pathPattern: "**/{gold-key,gold_key,rubric,answer-key,answer_key}*", role: "evaluation" },
+  { id: "evaluation-filename", pathPattern: "**/*{eval,evals,evaluation,evaluations,benchmark,benchmarks,rubric,grader,gold-key,gold_key,answer-key,answer_key}*", role: "evaluation" },
+  { id: "fixture-answer", pathPattern: "**/{fixture,fixtures,__fixture__,__fixtures__}/**/*{expected,answer,gold,oracle}*", role: "evaluation" },
   { id: "archive", pathPattern: "**/{archive,archives,historical,history}/**", role: "archive", lifecycle: "historical" },
   { id: "proposal", pathPattern: "**/{proposal,proposals,draft,drafts,experiment,experiments}/**", role: "proposal", lifecycle: "proposed" },
   { id: "decision", pathPattern: "**/{decision,decisions,adr,adrs}/**", role: "decision" },
@@ -19,7 +84,7 @@ const DEFAULT_RULES: AuthorityPolicy["sourceRules"] = [
 
 export const DEFAULT_AUTHORITY_POLICY: AuthorityPolicy = {
   id: "continuity.default-authority",
-  version: "2.0.0",
+  version: "2.4.0",
   authorityWeights: {
     immutable: 1,
     retcon: 0.9,
@@ -38,11 +103,38 @@ export const DEFAULT_AUTHORITY_POLICY: AuthorityPolicy = {
     causal: { implementation: 1, test: 0.9, configuration: 0.85, observation: 0.8, decision: 0.65, intent: 0.6, asset: 0.4, proposal: 0.25, archive: 0.2, reference: 0.25 },
     historical: { archive: 1, observation: 0.9, decision: 0.7, intent: 0.6, implementation: 0.45, test: 0.4, configuration: 0.4, proposal: 0.3, reference: 0.5 },
   },
+  allowedUsesByRole: DEFAULT_ALLOWED_USES,
+  allowedUsesByAuthority: {
+    immutable: Object.fromEntries(everyClaimKind.map((kind) => [kind, establish])),
+    canon: Object.fromEntries(everyClaimKind.map((kind) => [kind, establish])),
+    retcon: Object.fromEntries(everyClaimKind.map((kind) => [kind, establish])),
+    production: Object.fromEntries(everyClaimKind.map((kind) => [kind, establish])),
+    proposal: Object.fromEntries(everyClaimKind.map((kind) => [kind, propose])),
+    reference: {
+      identity: establish,
+      historical: establish,
+      normative: contextualize,
+      configured: contextualize,
+      implemented: contextualize,
+      tested: contextualize,
+      observed: contextualize,
+      causal: contextualize,
+    },
+  } as AuthorityPolicy["allowedUsesByAuthority"],
+  allowedUsesByAssertionScope: {
+    project_truth: Object.fromEntries(everyClaimKind.map((kind) => [kind, establish])),
+    // This establishes only that a pinned source states the proposition. The
+    // conclusion and top-level truthStatus retain that narrower plane.
+    source_assertion: Object.fromEntries(everyClaimKind.map((kind) => [kind, establish])),
+    proposal: Object.fromEntries(everyClaimKind.map((kind) => [kind, propose])),
+  } as AuthorityPolicy["allowedUsesByAssertionScope"],
   sourceRules: DEFAULT_RULES,
   excludedRoles: ["evaluation"],
   protectedAuthorities: ["immutable"],
   maxEvidence: 24,
   minimumPerLane: 1,
+  maxRetrievalLanes: 5,
+  maxResultsPerLane: 10,
 };
 
 export type EvidenceProfile = {
@@ -102,14 +194,42 @@ export function evidencePath(title: string, locator: string): string {
 
 function heuristicRole(path: string): EvidenceRole {
   const basename = path.split("/").pop() ?? path;
+  const stem = basename.replace(/\.[^.]+$/, "");
+  if (/(?:^|[-_.])(evals?|evaluation|benchmarks?|rubric|grader|gold[-_]?key|answer[-_]?key)(?:[-_.]|$)/i.test(stem)) return "evaluation";
+  if (/(?:^|\/)(?:fixture|fixtures|__fixture__|__fixtures__)(?:\/|$)/i.test(path)
+    && /(?:^|[-_.])(expected|answer|gold|oracle)(?:[-_.]|$)/i.test(stem)) return "evaluation";
+  // Lifecycle-bearing filenames are common outside carefully organized
+  // repositories. Classify the filename itself before its extension so a
+  // DRAFT.yaml cannot masquerade as active configuration.
+  if (/(?:^|[-_.])(archived?|historical|legacy|obsolete)(?:[-_.]|$)/i.test(stem)) return "archive";
+  if (/(?:^|[-_.])(draft|proposal|proposed|experiment)(?:[-_.]|$)/i.test(stem)) return "proposal";
   if (/^(agents|readme)\.md$/i.test(basename) || /(?:contract|policy|charter|requirements?|specification)\b/i.test(basename)) return "intent";
   if (/(?:^|[-_.])(adr|decision)(?:[-_.]|$)/i.test(basename)) return "decision";
   if (/(?:^|[-_.])(test|tests|spec)(?:[-_.]|$)/i.test(basename) || /\.(?:test|spec)\.[a-z\d]+$/i.test(basename)) return "test";
+  // A structured serialization format describes *what kind of file it is*,
+  // not what authority role its contents play. Story, canon, cast, and event
+  // sources remain narrative intent even when encoded as YAML/CSV/JSON. An
+  // explicit config/settings path retains configuration semantics.
+  if (isStructuredOrDocument(basename) && isConfigurationPath(path)) return "configuration";
+  if (isStructuredOrDocument(basename) && isNarrativeSourcePath(path, stem)) return "intent";
   if (/\.(?:json|ya?ml|toml|ini|csv|tsv|properties)$/i.test(basename)) return "configuration";
   if (/\.(?:[cm]?[jt]sx?|py|rb|go|rs|java|kt|swift|cs|cpp|c|h|php|sh|sql)$/i.test(basename)) return "implementation";
   if (/(?:manifest|asset|art|visual|sprite|image)/i.test(path)) return "asset";
   if (/(?:release|deploy|incident|audit|ledger|telemetry|observation)/i.test(path)) return "observation";
   return "reference";
+}
+
+function isStructuredOrDocument(basename: string): boolean {
+  return /\.(?:json|ya?ml|toml|ini|csv|tsv|properties|md|mdx|txt|pdf|docx?|epub)$/i.test(basename);
+}
+
+function isConfigurationPath(path: string): boolean {
+  return /(?:^|\/)(?:config|configs|configuration|settings)(?:\/|$)/i.test(path);
+}
+
+function isNarrativeSourcePath(path: string, stem: string): boolean {
+  return /(?:^|\/)(?:canon|story|stories|narrative|characters?|events?)(?:\/|$)/i.test(path)
+    || /(?:^|[-_.])(story|stories|canon|bible|character|characters|event|events|chapter|chapters|novel|manuscript|screenplay|script)(?:[-_.]|$)/i.test(stem);
 }
 
 function lifecycleForRole(role: EvidenceRole): EvidenceLifecycle {

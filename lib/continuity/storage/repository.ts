@@ -97,6 +97,29 @@ export type StoredRepositoryEntry = {
 
 export type CreateRepositoryEntryInput = Omit<StoredRepositoryEntry, "id" | "createdAt">;
 
+export type UsageDecision = {
+  allowed: boolean;
+  count: number;
+  limit: number;
+  retryAfterSeconds: number;
+};
+
+export type UsageReservationRule = {
+  id: string;
+  scopeKey: string;
+  operation: string;
+  limit: number;
+  windowSeconds: number;
+  amount?: number;
+};
+
+export type UsageReservationDecision = {
+  allowed: boolean;
+  blockedRuleId: string | null;
+  retryAfterSeconds: number;
+  decisions: Array<UsageDecision & { ruleId: string }>;
+};
+
 type CreateSourceInput = Omit<StoredSource, "indexStatus" | "indexError" | "createdAt"> & {
   indexStatus?: SourceIndexStatus;
 };
@@ -122,7 +145,98 @@ export class ContinuityRepository {
 
     const project = await this.getProject(id);
     if (!project) throw new Error("The project could not be created.");
+    await this.db.prepare(
+      `INSERT OR IGNORE INTO project_revisions (
+         project_id, revision_id, parent_revision_id, reason
+       ) VALUES (?1, ?2, NULL, 'project-created')`,
+    ).bind(project.id, project.activeRevision).run();
     return project;
+  }
+
+  async consumeUsage(
+    scopeKey: string,
+    operation: string,
+    limit: number,
+    windowSeconds: number,
+    nowMs = Date.now(),
+    amount = 1,
+  ): Promise<UsageDecision> {
+    if (!scopeKey.trim() || !operation.trim()) throw new TypeError("Usage scope and operation are required.");
+    if (!Number.isSafeInteger(limit) || limit < 1
+      || !Number.isSafeInteger(windowSeconds) || windowSeconds < 1
+      || !Number.isSafeInteger(amount) || amount < 1 || amount > limit) {
+      throw new TypeError("Usage limit, window, and amount must be positive bounded integers.");
+    }
+    const nowSeconds = Math.floor(nowMs / 1000);
+    const windowStart = Math.floor(nowSeconds / windowSeconds) * windowSeconds;
+    const result = await this.db.prepare(
+      `INSERT INTO usage_windows (
+         scope_key, operation, window_start, window_seconds, count, updated_at
+       ) VALUES (?1, ?2, ?3, ?4, ?6, CURRENT_TIMESTAMP)
+       ON CONFLICT(scope_key, operation, window_start, window_seconds) DO UPDATE SET
+         count = usage_windows.count + ?6,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE usage_windows.count + ?6 <= ?5`,
+    ).bind(scopeKey, operation, windowStart, windowSeconds, limit, amount).run();
+    const row = first(await this.db.prepare(
+      `SELECT count FROM usage_windows
+       WHERE scope_key = ?1 AND operation = ?2 AND window_start = ?3 AND window_seconds = ?4
+       LIMIT 1`,
+    ).bind(scopeKey, operation, windowStart, windowSeconds).all<{ count: number }>());
+    const count = row?.count ?? limit;
+    return {
+      allowed: Number(result.meta?.changes ?? 0) > 0,
+      count,
+      limit,
+      retryAfterSeconds: Math.max(1, windowStart + windowSeconds - nowSeconds),
+    };
+  }
+
+  /**
+   * Reserve a bounded operation against several durable usage dimensions.
+   * Every rule is an atomic conditional D1 upsert. Rules are evaluated from
+   * narrowest to broadest and stop at the first denial. Earlier successful
+   * reservations are deliberately not refunded: a provider failure or a later
+   * global denial may consume capacity, but races can never oversubscribe it.
+   */
+  async reserveUsageBudget(
+    rules: readonly UsageReservationRule[],
+    nowMs = Date.now(),
+  ): Promise<UsageReservationDecision> {
+    if (!rules.length || rules.length > 8) {
+      throw new TypeError("A usage reservation requires between one and eight rules.");
+    }
+    const seen = new Set<string>();
+    const decisions: UsageReservationDecision["decisions"] = [];
+    for (const rule of rules) {
+      if (!rule.id.trim()) throw new TypeError("Every usage reservation rule requires an ID.");
+      const key = `${rule.scopeKey}\u0000${rule.operation}\u0000${rule.windowSeconds}`;
+      if (seen.has(key)) throw new TypeError("A usage reservation cannot charge the same window twice.");
+      seen.add(key);
+      const decision = await this.consumeUsage(
+        rule.scopeKey,
+        rule.operation,
+        rule.limit,
+        rule.windowSeconds,
+        nowMs,
+        rule.amount ?? 1,
+      );
+      decisions.push({ ruleId: rule.id, ...decision });
+      if (!decision.allowed) {
+        return {
+          allowed: false,
+          blockedRuleId: rule.id,
+          retryAfterSeconds: decision.retryAfterSeconds,
+          decisions,
+        };
+      }
+    }
+    return {
+      allowed: true,
+      blockedRuleId: null,
+      retryAfterSeconds: 0,
+      decisions,
+    };
   }
 
   async getProject(id: string): Promise<StoredProject | null> {
@@ -147,6 +261,14 @@ export class ContinuityRepository {
        ORDER BY created_at DESC, id DESC LIMIT ?2`,
     ).bind(projectId, safeLimit).all<StoredSource>();
     return result.results ?? [];
+  }
+
+  async getProjectSourceUsage(projectId: string): Promise<{ sourceCount: number; totalBytes: number }> {
+    const row = first(await this.db.prepare(
+      `SELECT COUNT(*) AS sourceCount, COALESCE(SUM(byte_size), 0) AS totalBytes
+       FROM sources WHERE project_id = ?1`,
+    ).bind(projectId).all<{ sourceCount: number; totalBytes: number }>());
+    return { sourceCount: Number(row?.sourceCount ?? 0), totalBytes: Number(row?.totalBytes ?? 0) };
   }
 
   async getSource(projectId: string, sourceId: string): Promise<StoredSource | null> {
@@ -213,14 +335,62 @@ export class ContinuityRepository {
     ).bind(sourceId, status, error).run();
   }
 
-  async bumpProjectRevision(projectId: string): Promise<string> {
-    const revision = `revision_${crypto.randomUUID()}`;
-    await this.db.prepare(
-      `UPDATE projects
-       SET active_revision = ?2, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?1`,
-    ).bind(projectId, revision).run();
-    return revision;
+  async listRevisionSourceVersionIds(projectId: string, revisionId: string): Promise<string[]> {
+    const result = await this.db.prepare(
+      `SELECT source_version_id AS sourceVersionId
+       FROM revision_source_versions
+       WHERE project_id = ?1 AND revision_id = ?2
+       ORDER BY source_version_id`,
+    ).bind(projectId, revisionId).all<{ sourceVersionId: string }>();
+    return (result.results ?? []).map((row) => row.sourceVersionId);
+  }
+
+  async hasProjectRevision(projectId: string, revisionId: string): Promise<boolean> {
+    const result = await this.db.prepare(
+      `SELECT 1 AS present FROM project_revisions
+       WHERE project_id = ?1 AND revision_id = ?2 LIMIT 1`,
+    ).bind(projectId, revisionId).all<{ present: number }>();
+    return Boolean(first(result)?.present);
+  }
+
+  async bumpProjectRevision(
+    projectId: string,
+    addedSourceVersionId: string,
+    reason = "source-upload",
+  ): Promise<string> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const project = await this.getProject(projectId);
+      if (!project) throw new Error("Project not found while creating a revision.");
+      const revision = `revision_${crypto.randomUUID()}`;
+      const results = await this.db.batch([
+        this.db.prepare(
+          `INSERT INTO project_revisions (
+             project_id, revision_id, parent_revision_id, reason
+           ) VALUES (?1, ?2, ?3, ?4)`,
+        ).bind(projectId, revision, project.activeRevision, reason.slice(0, 120)),
+        this.db.prepare(
+          `INSERT OR IGNORE INTO revision_source_versions (
+             project_id, revision_id, source_id, source_version_id
+           )
+           SELECT project_id, ?2, source_id, source_version_id
+           FROM revision_source_versions
+           WHERE project_id = ?1 AND revision_id = ?3`,
+        ).bind(projectId, revision, project.activeRevision),
+        this.db.prepare(
+          `INSERT OR IGNORE INTO revision_source_versions (
+             project_id, revision_id, source_id, source_version_id
+           )
+           SELECT project_id, ?2, id, version_id FROM sources
+           WHERE project_id = ?1 AND version_id = ?3`,
+        ).bind(projectId, revision, addedSourceVersionId),
+        this.db.prepare(
+          `UPDATE projects SET active_revision = ?2, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?1 AND active_revision = ?3`,
+        ).bind(projectId, revision, project.activeRevision),
+      ]);
+      if (Number(results.at(-1)?.meta?.changes ?? 0) > 0) return revision;
+    }
+    throw new Error("The project revision changed concurrently; retry the upload.");
   }
 
   async ensureRepositoryConnection(input: {
@@ -433,6 +603,30 @@ export class ContinuityRepository {
          WHERE id = ?1`,
       ).bind(input.connectionId, input.snapshotId),
       this.db.prepare(
+        `INSERT INTO project_revisions (
+           project_id, revision_id, parent_revision_id, reason
+         )
+         SELECT id, ?2, active_revision, 'repository-snapshot'
+         FROM projects WHERE id = ?1`,
+      ).bind(input.projectId, revision),
+      this.db.prepare(
+        `INSERT OR IGNORE INTO revision_source_versions (
+           project_id, revision_id, source_id, source_version_id
+         )
+         SELECT memberships.project_id, ?2, memberships.source_id, memberships.source_version_id
+         FROM revision_source_versions memberships
+         JOIN projects project ON project.id = memberships.project_id
+         WHERE memberships.project_id = ?1
+           AND memberships.revision_id = project.active_revision`,
+      ).bind(input.projectId, revision),
+      this.db.prepare(
+        `INSERT OR IGNORE INTO revision_source_versions (
+           project_id, revision_id, source_id, source_version_id
+         )
+         SELECT project_id, ?2, id, version_id FROM sources
+         WHERE project_id = ?1 AND id = ?3`,
+      ).bind(input.projectId, revision, input.packetSourceId),
+      this.db.prepare(
         `UPDATE projects SET active_revision = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`,
       ).bind(input.projectId, revision),
     ]);
@@ -451,6 +645,9 @@ export class ContinuityRepository {
 
   async activateRepositorySnapshot(connectionId: string, snapshotId: string, projectId: string): Promise<string> {
     const revision = `repository:${snapshotId}`;
+    if (!(await this.hasProjectRevision(projectId, revision))) {
+      throw new Error("The repository snapshot predates revision membership and cannot be replayed safely.");
+    }
     await this.db.batch([
       this.db.prepare(
         `UPDATE repository_connections SET active_snapshot_id = ?2, sync_status = 'ready',

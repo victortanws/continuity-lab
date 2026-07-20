@@ -76,6 +76,47 @@ export const analyses = sqliteTable("analyses", {
   index("analyses_project_created_idx").on(table.projectId, table.createdAt),
 ]);
 
+/** Fixed-window counters are billing/safety controls, not product analytics.
+ * Scope keys are already pseudonymous project/user/IP digests. */
+export const usageWindows = sqliteTable("usage_windows", {
+  scopeKey: text("scope_key").notNull(),
+  operation: text("operation").notNull(),
+  windowStart: integer("window_start").notNull(),
+  windowSeconds: integer("window_seconds").notNull(),
+  count: integer("count").notNull().default(0),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("usage_windows_scope_operation_window_unique").on(
+    table.scopeKey,
+    table.operation,
+    table.windowStart,
+    table.windowSeconds,
+  ),
+  index("usage_windows_updated_idx").on(table.updatedAt),
+]);
+
+export const projectRevisions = sqliteTable("project_revisions", {
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  revisionId: text("revision_id").notNull(),
+  parentRevisionId: text("parent_revision_id"),
+  reason: text("reason").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("project_revisions_project_revision_unique").on(table.projectId, table.revisionId),
+  index("project_revisions_project_created_idx").on(table.projectId, table.createdAt),
+]);
+
+export const revisionSourceVersions = sqliteTable("revision_source_versions", {
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  revisionId: text("revision_id").notNull(),
+  sourceId: text("source_id").notNull().references(() => sources.id, { onDelete: "cascade" }),
+  sourceVersionId: text("source_version_id").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("revision_sources_membership_unique").on(table.projectId, table.revisionId, table.sourceVersionId),
+  index("revision_sources_revision_idx").on(table.projectId, table.revisionId),
+]);
+
 /**
  * Repository records are provider-neutral snapshots. A mutable branch name is
  * resolved once, while the immutable commit and selected blob identities are

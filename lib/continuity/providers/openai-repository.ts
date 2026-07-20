@@ -4,6 +4,12 @@ import {
   type StoredRepositorySnapshot,
   type StoredSource,
 } from "../storage/repository";
+import {
+  ConnectorExecutionBudget,
+  ConnectorExecutionError,
+  connectorAbortError,
+  readConnectorResponseJsonBounded,
+} from "../http/connector-execution";
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -17,7 +23,11 @@ export type RepositoryIndexResult = {
   capability: "stored_snapshot" | "indexing" | "indexed" | "stored_with_index_error";
   vectorStoreId?: string;
   error?: string;
+  errorCode?: string;
 };
+
+const OPENAI_REPOSITORY_TIMEOUT_MS = 30_000;
+const OPENAI_REPOSITORY_RESPONSE_MAX_BYTES = 256 * 1024;
 
 /**
  * A repository snapshot receives its own vector store. Query routing selects
@@ -32,6 +42,7 @@ export async function indexRepositoryPacket(input: {
   projectTitle: string;
   apiKey?: string;
   fetch?: FetchLike;
+  executionBudget?: ConnectorExecutionBudget;
 }): Promise<RepositoryIndexResult> {
   const apiKey = input.apiKey?.trim();
   if (!apiKey) return { status: "stored", capability: "stored_snapshot" };
@@ -57,6 +68,7 @@ export async function indexRepositoryPacket(input: {
           }),
         },
         `continuity-repository-vector-${input.snapshot.id}`,
+        input.executionBudget,
       );
       vectorStoreId = vectorStore.id;
       await input.repository.setProviderBinding({
@@ -83,6 +95,7 @@ export async function indexRepositoryPacket(input: {
         "/files",
         { method: "POST", body: form },
         `continuity-repository-file-${input.source.versionId}`,
+        input.executionBudget,
       );
       fileId = uploaded.id;
       await input.repository.setProviderBinding({
@@ -116,6 +129,7 @@ export async function indexRepositoryPacket(input: {
         }),
       },
       `continuity-repository-attach-${input.snapshot.id}`,
+      input.executionBudget,
     );
     await input.repository.setProviderBinding({
       projectId: input.source.projectId,
@@ -141,6 +155,7 @@ export async function indexRepositoryPacket(input: {
       status: "failed",
       capability: "stored_with_index_error",
       error: message,
+      errorCode: error instanceof ConnectorExecutionError ? error.code : "repository_index_failed",
     };
   }
 }
@@ -150,6 +165,7 @@ export async function refreshRepositoryPacketIndex(input: {
   snapshot: StoredRepositorySnapshot;
   apiKey?: string;
   fetch?: FetchLike;
+  executionBudget?: ConnectorExecutionBudget;
 }): Promise<StoredRepositorySnapshot> {
   const apiKey = input.apiKey?.trim();
   if (!apiKey || input.snapshot.indexStatus !== "indexing" || !input.snapshot.packetSourceId) {
@@ -176,6 +192,7 @@ export async function refreshRepositoryPacketIndex(input: {
       `/vector_stores/${encodeURIComponent(vectorStoreId)}/files/${encodeURIComponent(fileId)}`,
       { method: "GET" },
       `continuity-repository-status-${input.snapshot.id}`,
+      input.executionBudget,
     );
     if (providerFile.status === "completed") {
       await input.repository.updateRepositorySnapshotIndexStatus(input.snapshot.id, "indexed");
@@ -199,19 +216,37 @@ async function openAIRequest<T>(
   path: string,
   init: RequestInit,
   idempotencyKey: string,
+  executionBudget?: ConnectorExecutionBudget,
 ): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${apiKey}`);
   headers.set("Idempotency-Key", idempotencyKey);
-  const response = await fetcher(`https://api.openai.com/v1${path}`, {
-    ...init,
-    headers,
-    redirect: "error",
-  });
+  const phase = "openai_repository_index";
+  let response: Response;
+  try {
+    response = await fetcher(`https://api.openai.com/v1${path}`, {
+      ...init,
+      headers,
+      redirect: "error",
+      signal: executionBudget?.signalFor(phase, OPENAI_REPOSITORY_TIMEOUT_MS)
+        ?? AbortSignal.timeout(OPENAI_REPOSITORY_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (executionBudget) {
+      const executionError = connectorAbortError(error, executionBudget, phase);
+      if (executionError) throw executionError;
+    }
+    if (error instanceof ConnectorExecutionError) throw error;
+    throw new Error("OpenAI repository indexing could not be reached.");
+  }
   if (!response.ok) {
     throw new Error(`OpenAI repository indexing failed with status ${response.status}.`);
   }
-  const payload = await response.json() as T;
+  const payload = await readConnectorResponseJsonBounded<T>(
+    response,
+    OPENAI_REPOSITORY_RESPONSE_MAX_BYTES,
+    phase,
+  );
   if (!payload || typeof payload !== "object" || typeof (payload as unknown as OpenAIObject).id !== "string") {
     throw new Error("OpenAI repository indexing returned an invalid response.");
   }

@@ -4,11 +4,15 @@ import {
 } from "@/lib/continuity/providers/openai-repository";
 import {
   DEFAULT_REPOSITORY_LIMITS,
+  encodeRepositoryPacketMetadata,
   GitHubRepositoryProvider,
+  REPOSITORY_PACKET_FRAME_VERSION,
   REPOSITORY_POLICY_VERSION,
   RepositoryProviderError,
   escapeRepositoryPacketControlSyntax,
   parseGitHubRepository,
+  repositoryAllowedForCredential,
+  scanRepositoryTextForSecrets,
   selectRepositoryEntries,
   type RepositorySelection,
   type RepositoryTreeEntry,
@@ -24,6 +28,27 @@ import {
   classifyRepositoryFile,
   parseRepositoryAuthorityRoutes,
 } from "@/lib/continuity/repositories/authority";
+import {
+  isLocalRequest,
+  projectAuthenticationRequired,
+  projectMutationForbidden,
+  resolveProjectScope,
+  trustedAuthenticatedUserEmail,
+  type IdentityTrustConfig,
+} from "@/lib/continuity/auth/project-scope";
+import {
+  guardRequestBody,
+  privateNoStoreHeaders,
+  rateLimitResponse,
+  readJsonBodyBounded,
+  RequestBodyError,
+  requestBodyErrorResponse,
+  usageActorScopeKey,
+} from "@/lib/continuity/http/security";
+import {
+  ConnectorExecutionBudget,
+  ConnectorExecutionError,
+} from "@/lib/continuity/http/connector-execution";
 
 export const runtime = "edge";
 
@@ -31,15 +56,19 @@ const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const DEFAULT_MAX_FILES_PER_SYNC = 60;
 const DEFAULT_MAX_TOTAL_BYTES = 6 * 1024 * 1024;
 const FETCH_CONCURRENCY = 8;
+const REPOSITORY_CONNECTOR_DEADLINE_MS = 120_000;
+const REPOSITORY_CONNECTOR_OVERHEAD_CALLS = 5;
 
 type RuntimeEnv = {
   DB?: D1Database;
   SOURCES?: R2Bucket;
   OPENAI_API_KEY?: string;
   GITHUB_TOKEN?: string;
+  GITHUB_ALLOWED_REPOSITORIES?: string;
   REPOSITORY_SYNC_ALLOWED_EMAILS?: string;
   REPOSITORY_MAX_FILES?: string;
   REPOSITORY_MAX_TOTAL_BYTES?: string;
+  CONTINUITY_TRUSTED_INGRESS_ORIGINS?: string;
 };
 
 type FetchedEntry = {
@@ -55,16 +84,38 @@ async function runtimeEnv(): Promise<RuntimeEnv> {
   return env as unknown as RuntimeEnv;
 }
 
+function identityTrust(bindings?: RuntimeEnv | null): IdentityTrustConfig {
+  return { trustedIngressOrigins: bindings?.CONTINUITY_TRUSTED_INGRESS_ORIGINS };
+}
+
+async function hostedPreflightBindings(request: Request): Promise<RuntimeEnv | null> {
+  if (isLocalRequest(request)) return null;
+  try {
+    return await runtimeEnv();
+  } catch {
+    // Hosted mutable routes stay closed when their server-owned trust setting
+    // cannot be loaded; the caller-provided identity header is never a fallback.
+    return null;
+  }
+}
+
 export async function GET(request: Request) {
-  const projectId = new URL(request.url).searchParams.get("projectId")?.trim() ?? "";
-  if (!PROJECT_ID_PATTERN.test(projectId)) {
+  const requestedProjectId = new URL(request.url).searchParams.get("projectId")?.trim() ?? "";
+  if (!PROJECT_ID_PATTERN.test(requestedProjectId)) {
     return Response.json({ error: "A valid projectId is required." }, { status: 400 });
   }
   try {
     const bindings = await runtimeEnv();
+    const scope = await resolveProjectScope(request, requestedProjectId, identityTrust(bindings));
+    if (!scope) return projectAuthenticationRequired();
+    const projectId = scope.projectId;
     if (!bindings.DB) throw new Error("Continuity storage is not configured.");
     const repository = new ContinuityRepository(bindings.DB);
     const connections = await repository.listRepositoryConnections(projectId);
+    const executionBudget = new ConnectorExecutionBudget({
+      deadlineAt: Date.now() + 30_000,
+      maxCalls: Math.max(1, Math.min(512, connections.length)),
+    });
     const records = await Promise.all(connections.map(async (connection) => {
       let snapshot = connection.activeSnapshotId
         ? await repository.getRepositorySnapshot(connection.activeSnapshotId)
@@ -74,6 +125,7 @@ export async function GET(request: Request) {
           repository,
           snapshot,
           apiKey: bindings.OPENAI_API_KEY,
+          executionBudget,
         });
       }
       return {
@@ -82,45 +134,77 @@ export async function GET(request: Request) {
       };
     }));
     return Response.json({
-      projectId,
+      projectId: requestedProjectId,
       repositories: records,
       ...(records[0] ?? {}),
-    });
+    }, { headers: privateNoStoreHeaders() });
   } catch (error) {
     return storageError(error);
   }
 }
 
 export async function POST(request: Request) {
+  const preflightBindings = await hostedPreflightBindings(request);
+  const requestIdentityTrust = identityTrust(preflightBindings);
+  const requestGuard = guardRequestBody(request, {
+    kind: "json",
+    maxBytes: 8 * 1024,
+    requireIdentityBeforeParsing: true,
+    identityTrust: requestIdentityTrust,
+  });
+  if (requestGuard) return requestGuard;
   let payload: Record<string, unknown>;
   try {
-    payload = await request.json() as Record<string, unknown>;
-  } catch {
-    return Response.json({ error: "The request body must be valid JSON." }, { status: 400 });
+    payload = await readJsonBodyBounded(request, 8 * 1024) as Record<string, unknown>;
+  } catch (error) {
+    return error instanceof RequestBodyError
+      ? requestBodyErrorResponse(error)
+      : Response.json({ error: "The request body must be valid JSON." }, { status: 400 });
   }
 
-  const projectId = typeof payload.projectId === "string" ? payload.projectId.trim() : "";
+  const requestedProjectId = typeof payload.projectId === "string" ? payload.projectId.trim() : "";
   const repositoryInput = typeof payload.repository === "string" ? payload.repository.trim() : "";
   const requestedRef = typeof payload.ref === "string" ? payload.ref.trim().slice(0, 200) || "HEAD" : "HEAD";
-  if (!PROJECT_ID_PATTERN.test(projectId)) {
+  if (!PROJECT_ID_PATTERN.test(requestedProjectId)) {
     return Response.json({ error: "A valid projectId is required." }, { status: 400 });
   }
   if (!repositoryInput || repositoryInput.length > 300) {
     return Response.json({ error: "A GitHub repository URL is required." }, { status: 400 });
   }
+  const scope = await resolveProjectScope(request, requestedProjectId, requestIdentityTrust);
+  if (!scope) return projectAuthenticationRequired();
+  const mutationForbidden = projectMutationForbidden(scope);
+  if (mutationForbidden) return mutationForbidden;
+  const projectId = scope.projectId;
 
   let connection: StoredRepositoryConnection | null = null;
   let snapshot: StoredRepositorySnapshot | null = null;
   try {
-    const bindings = await runtimeEnv();
+    const bindings = preflightBindings ?? await runtimeEnv();
     if (!bindings.DB || !bindings.SOURCES) {
       throw new Error("Continuity repository storage is not configured.");
     }
-    const authorization = authorizeSync(request, bindings);
+    const authorization = authorizeSync(request, bindings, requestIdentityTrust);
     if (authorization) return authorization;
 
     const reference = parseGitHubRepository(repositoryInput);
+    const repositoryAuthorization = authorizeRepository(reference.fullName, bindings);
+    if (repositoryAuthorization) return repositoryAuthorization;
+    const limits = repositoryLimits(bindings);
+    const executionBudget = new ConnectorExecutionBudget({
+      deadlineAt: Date.now() + REPOSITORY_CONNECTOR_DEADLINE_MS,
+      maxCalls: limits.maxFiles + REPOSITORY_CONNECTOR_OVERHEAD_CALLS,
+    });
     const repository = new ContinuityRepository(bindings.DB);
+    const actorUsage = await repository.consumeUsage(
+      await usageActorScopeKey(request, requestIdentityTrust),
+      "repository_sync",
+      5,
+      24 * 60 * 60,
+    );
+    if (!actorUsage.allowed) return rateLimitResponse(actorUsage.retryAfterSeconds);
+    const globalUsage = await repository.consumeUsage("global:github", "repository_sync", 100, 24 * 60 * 60);
+    if (!globalUsage.allowed) return rateLimitResponse(globalUsage.retryAfterSeconds);
     const project = await repository.ensureProject(projectId, "Continuity Lab project");
     connection = await repository.ensureRepositoryConnection({
       projectId,
@@ -131,7 +215,11 @@ export async function POST(request: Request) {
       requestedRef,
     });
 
-    const provider = new GitHubRepositoryProvider({ token: bindings.GITHUB_TOKEN, timeoutMs: 12_000 });
+    const provider = new GitHubRepositoryProvider({
+      token: bindings.GITHUB_TOKEN,
+      timeoutMs: 12_000,
+      executionBudget,
+    });
     let revision;
     try {
       revision = await provider.resolveRevision(reference, requestedRef);
@@ -151,6 +239,7 @@ export async function POST(request: Request) {
         repository,
         snapshot: existing,
         projectTitle: project.title,
+        executionBudget,
       });
       const projectRevision = await repository.activateRepositorySnapshot(connection.id, existing.id, projectId);
       connection = await repository.getRepositoryConnection(
@@ -172,7 +261,6 @@ export async function POST(request: Request) {
     });
 
     const tree = await provider.listTree(reference, revision);
-    const limits = repositoryLimits(bindings);
     const selection = selectRepositoryEntries(tree.entries, limits);
     if (!selection.selected.length) {
       throw new RepositoryProviderError(
@@ -181,7 +269,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const fetched = await fetchEntries(provider, reference, selection.selected);
+    const decoded = await fetchEntries(provider, reference, selection.selected);
+    const secretOmissions = decoded.flatMap((item) => {
+      const scan = scanRepositoryTextForSecrets(item.text);
+      return scan.detected ? [{ path: item.entry.path, reason: "secret_detected", kinds: scan.kinds }] : [];
+    });
+    const secretPaths = new Set(secretOmissions.map((item) => item.path));
+    const fetched = decoded.filter((item) => !secretPaths.has(item.entry.path));
     if (!fetched.length) {
       throw new RepositoryProviderError(
         "No selected repository files contained valid UTF-8 text.",
@@ -189,8 +283,9 @@ export async function POST(request: Request) {
       );
     }
     const invalidTextPaths = selection.selected
-      .filter((entry) => !fetched.some((item) => item.entry.path === entry.path))
+      .filter((entry) => !decoded.some((item) => item.entry.path === entry.path))
       .map((entry) => ({ path: entry.path, reason: "unsupported_text_encoding" }));
+    const processingOmissions = [...invalidTextPaths, ...secretOmissions];
     const baseKey = `projects/${encodeURIComponent(projectId)}/repositories/${connection.id}/snapshots/${snapshot.id}`;
     const storedEntries = await storeEntries(bindings.SOURCES, baseKey, snapshot.id, fetched, {
       projectId,
@@ -205,7 +300,7 @@ export async function POST(request: Request) {
       revision,
       treeTruncated: tree.truncated,
       selection,
-      invalidTextPaths,
+      invalidTextPaths: processingOmissions,
       files: fetched,
     });
     const packetBytes = new TextEncoder().encode(packetText);
@@ -238,9 +333,9 @@ export async function POST(request: Request) {
       tree: { truncated: tree.truncated, entriesReported: tree.entries.length },
       coverage: {
         ...selection.coverage,
-        complete: selection.coverage.complete && !tree.truncated && invalidTextPaths.length === 0,
-        partial: selection.coverage.partial || tree.truncated || invalidTextPaths.length > 0,
-        invalidTextPaths,
+        complete: selection.coverage.complete && !tree.truncated && processingOmissions.length === 0,
+        partial: selection.coverage.partial || tree.truncated || processingOmissions.length > 0,
+        processingOmissions,
       },
       authorityRouting: { origin: authorityRouting.origin, routeCount: authorityRouting.routes.length },
       files: fetched.map((item) => {
@@ -257,7 +352,7 @@ export async function POST(request: Request) {
           closedWorld: route.closedWorld,
         };
       }),
-      omitted: selection.skipped,
+      omitted: [...selection.skipped, ...processingOmissions],
     };
     await bindings.SOURCES.put(manifestKey, new TextEncoder().encode(JSON.stringify(manifest)), {
       httpMetadata: { contentType: "application/json" },
@@ -272,8 +367,9 @@ export async function POST(request: Request) {
       packet: packetFile,
       projectTitle: project.title,
       apiKey: bindings.OPENAI_API_KEY,
+      executionBudget,
     });
-    const coverageComplete = selection.coverage.complete && !tree.truncated && invalidTextPaths.length === 0;
+    const coverageComplete = selection.coverage.complete && !tree.truncated && processingOmissions.length === 0;
     const projectRevision = await repository.promoteRepositorySnapshot({
       snapshotId: snapshot.id,
       connectionId: connection.id,
@@ -281,7 +377,7 @@ export async function POST(request: Request) {
       coverageComplete,
       treeTruncated: tree.truncated,
       selectedFileCount: fetched.length,
-      skippedFileCount: selection.skipped.length + invalidTextPaths.length,
+      skippedFileCount: selection.skipped.length + processingOmissions.length,
       totalBytes: fetched.reduce((sum, item) => sum + item.bytes.byteLength, 0),
       manifestR2Key: manifestKey,
       packetR2Key: source.r2Key,
@@ -320,13 +416,16 @@ export async function POST(request: Request) {
   }
 }
 
-function authorizeSync(request: Request, bindings: RuntimeEnv): Response | null {
+function authorizeSync(
+  request: Request,
+  bindings: RuntimeEnv,
+  identityTrustConfig: IdentityTrustConfig,
+): Response | null {
   const allowed = (bindings.REPOSITORY_SYNC_ALLOWED_EMAILS ?? "")
     .split(",")
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
-  const hostname = new URL(request.url).hostname.toLowerCase();
-  const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  const isLocal = isLocalRequest(request);
   if (!allowed.length && !isLocal) {
     return Response.json({
       error: "Repository synchronization is not enabled for this deployment.",
@@ -334,10 +433,24 @@ function authorizeSync(request: Request, bindings: RuntimeEnv): Response | null 
     }, { status: 503 });
   }
   if (allowed.length) {
-    const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase() ?? "";
+    const email = trustedAuthenticatedUserEmail(request, identityTrustConfig) ?? "";
     if (!email || !allowed.includes(email)) {
       return Response.json({ error: "You are not allowed to synchronize repositories for this Site." }, { status: 403 });
     }
+  }
+  return null;
+}
+
+function authorizeRepository(fullName: string, bindings: RuntimeEnv): Response | null {
+  if (!repositoryAllowedForCredential(
+    fullName,
+    bindings.GITHUB_TOKEN,
+    bindings.GITHUB_ALLOWED_REPOSITORIES,
+  )) {
+    return Response.json({
+      error: "This repository is not authorized for the configured GitHub credential.",
+      code: "repository_not_authorized_for_credential",
+    }, { status: 403 });
   }
   return null;
 }
@@ -419,7 +532,7 @@ async function storeEntries(
   return stored.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function buildRepositoryPacket(input: {
+export function buildRepositoryPacket(input: {
   repository: string;
   repositoryUrl: string;
   revision: { commitSha: string; treeSha: string; requestedRef: string; committedAt: string | null };
@@ -452,14 +565,35 @@ function buildRepositoryPacket(input: {
   const files = input.files.flatMap((item) => {
     const route = classifyRepositoryFile(item.entry.path, authorityRoutes.routes);
     const segments = packetSegments(escapeRepositoryPacketControlSyntax(item.text.replaceAll("\u0000", "")));
-    return segments.map((segment, index) => [
-      "",
-      `<!-- CONTINUITY_FILE path=${JSON.stringify(item.entry.path)} role=${route.role} lifecycle=${route.lifecycle} claim_kinds=${route.claimKinds.join(",")} authority=${route.authority} closed_world=${route.closedWorld ? "true" : "false"} lines=${segment.startLine}-${segment.endLine} blob=${item.entry.sha} sha256=${item.sha256} segment=${index + 1}/${segments.length} -->`,
-      `## FILE: ${item.entry.path} · lines ${segment.startLine}-${segment.endLine} · segment ${index + 1}/${segments.length}`,
-      "",
-      segment.text,
-      `<!-- /CONTINUITY_FILE path=${JSON.stringify(item.entry.path)} -->`,
-    ].join("\n"));
+    return segments.map((segment, index) => {
+      const metadata = encodeRepositoryPacketMetadata({
+        version: REPOSITORY_PACKET_FRAME_VERSION,
+        path: item.entry.path,
+        role: route.role,
+        lifecycle: route.lifecycle,
+        claimKinds: route.claimKinds,
+        authority: route.authority,
+        closedWorld: route.closedWorld,
+        startLine: segment.startLine,
+        endLine: segment.endLine,
+        blobSha: item.entry.sha,
+        contentSha256: item.sha256,
+        segment: index + 1,
+        segmentCount: segments.length,
+      });
+      // The display heading is percent-encoded too. A Git filename may contain
+      // HTML-comment syntax, so even a non-authoritative raw heading could mint
+      // a forged frame if a vector-search window began at that filename.
+      const displayPath = encodeURIComponent(item.entry.path);
+      return [
+        "",
+        `<!-- CONTINUITY_FILE metadata=${metadata} -->`,
+        `## FILE: ${displayPath} · lines ${segment.startLine}-${segment.endLine} · segment ${index + 1}/${segments.length}`,
+        "",
+        segment.text,
+        `<!-- /CONTINUITY_FILE metadata=${metadata} -->`,
+      ].join("\n");
+    });
   });
   return [...header, ...files, ""].join("\n");
 }
@@ -534,6 +668,7 @@ async function ensureExistingSnapshotIndex(input: {
   repository: ContinuityRepository;
   snapshot: StoredRepositorySnapshot;
   projectTitle: string;
+  executionBudget: ConnectorExecutionBudget;
 }) {
   if (!input.bindings.OPENAI_API_KEY?.trim()) {
     return {
@@ -574,20 +709,23 @@ async function ensureExistingSnapshotIndex(input: {
     packet,
     projectTitle: input.projectTitle,
     apiKey: input.bindings.OPENAI_API_KEY,
+    executionBudget: input.executionBudget,
   });
 }
 
 function responsePayload(
   connection: StoredRepositoryConnection,
   snapshot: StoredRepositorySnapshot,
-  indexing: { capability: string; status: string; error?: string },
+  indexing: { capability: string; status: string; error?: string; errorCode?: string },
   deduplicated: boolean,
 ) {
   return {
-    status: "ready",
+    status: indexing.status,
     capability: indexing.capability,
     queryable: indexing.status === "indexed",
     deduplicated,
+    ...(indexing.error ? { indexError: indexing.error } : {}),
+    ...(indexing.errorCode ? { indexErrorCode: indexing.errorCode } : {}),
     connection: publicConnection(connection),
     snapshot: publicSnapshot(snapshot),
     message: indexing.status === "indexed"
@@ -642,6 +780,14 @@ function requestError(error: unknown): Response {
     const status = error.status && error.status >= 400 && error.status < 600 ? error.status : 502;
     return Response.json({ error: error.message, code: error.code, retryable: error.retryable }, { status });
   }
+  if (error instanceof ConnectorExecutionError) {
+    return Response.json({
+      error: error.message,
+      code: error.code,
+      phase: error.phase,
+      retryable: true,
+    }, { status: error.httpStatus });
+  }
   return storageError(error);
 }
 
@@ -650,12 +796,14 @@ function storageError(error: unknown): Response {
 }
 
 function publicError(error: unknown): string {
-  if (error instanceof RepositoryProviderError || error instanceof TypeError) return error.message;
-  return error instanceof Error ? error.message.slice(0, 500) : "Repository synchronization failed.";
+  if (error instanceof RepositoryProviderError || error instanceof ConnectorExecutionError || error instanceof TypeError) return error.message;
+  return "Repository synchronization could not complete safely.";
 }
 
 function errorCode(error: unknown): string {
-  return error instanceof RepositoryProviderError ? error.code : error instanceof TypeError ? "invalid_repository" : "storage_error";
+  return error instanceof RepositoryProviderError || error instanceof ConnectorExecutionError
+    ? error.code
+    : error instanceof TypeError ? "invalid_repository" : "storage_error";
 }
 
 function contentType(path: string): string {

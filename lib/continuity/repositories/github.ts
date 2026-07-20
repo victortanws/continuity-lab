@@ -1,7 +1,33 @@
-import type { EvidenceRole } from "../contracts";
+import type {
+  CanonAuthority,
+  ClaimKind,
+  EvidenceLifecycle,
+  EvidenceRole,
+} from "../contracts";
 import { classifyRepositoryPath } from "../policy/default";
+import {
+  ConnectorExecutionBudget,
+  connectorAbortError,
+} from "../http/connector-execution";
 
-export const REPOSITORY_POLICY_VERSION = "continuity.repository-policy.v2" as const;
+export const REPOSITORY_POLICY_VERSION = "continuity.repository-policy.v3" as const;
+export const REPOSITORY_PACKET_FRAME_VERSION = "continuity.repository-frame.v1" as const;
+
+export type RepositoryPacketFrameMetadata = {
+  version: typeof REPOSITORY_PACKET_FRAME_VERSION;
+  path: string;
+  role: EvidenceRole;
+  lifecycle: EvidenceLifecycle;
+  claimKinds: ClaimKind[];
+  authority: CanonAuthority;
+  closedWorld: boolean;
+  startLine: number;
+  endLine: number;
+  blobSha: string;
+  contentSha256: string;
+  segment: number;
+  segmentCount: number;
+};
 
 export type RepositoryLimits = {
   maxTreeEntries: number;
@@ -98,6 +124,13 @@ const REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
 const ENCODED_PATH_TRICK_PATTERN = /%(?:2e|2f|5c)/i;
 
+export const GITHUB_RESPONSE_LIMITS = Object.freeze({
+  commitJsonBytes: 256 * 1024,
+  treeJsonBytes: 8 * 1024 * 1024,
+  errorJsonBytes: 64 * 1024,
+  blobEnvelopeBytes: 32 * 1024,
+});
+
 const ALLOWED_EXTENSIONS = new Set([
   "c", "cc", "cpp", "cs", "css", "csv", "go", "h", "hpp", "htm", "html",
   "java", "js", "json", "jsonc", "jsx", "kt", "kts", "md", "markdown", "php",
@@ -129,6 +162,7 @@ export type RepositoryProviderErrorCode =
   | "redirect_rejected"
   | "invalid_response"
   | "network_error"
+  | "response_too_large"
   | "provider_error";
 
 export class RepositoryProviderError extends Error {
@@ -226,6 +260,99 @@ export function isSafeRepositoryPath(path: string): boolean {
   return pathPolicy(path).safe;
 }
 
+const PACKET_ROLES = new Set<EvidenceRole>([
+  "intent", "decision", "configuration", "implementation", "test", "observation",
+  "asset", "proposal", "archive", "evaluation", "reference",
+]);
+const PACKET_LIFECYCLES = new Set<EvidenceLifecycle>(["active", "proposed", "historical", "superseded", "unknown"]);
+const PACKET_AUTHORITIES = new Set<CanonAuthority>([
+  "immutable", "retcon", "canon", "production", "proposal", "reference",
+]);
+const PACKET_CLAIM_KINDS = new Set<ClaimKind>([
+  "identity", "normative", "configured", "implemented", "tested", "observed", "causal", "historical",
+]);
+const PACKET_METADATA_KEYS = new Set([
+  "version", "path", "role", "lifecycle", "claimKinds", "authority", "closedWorld",
+  "startLine", "endLine", "blobSha", "contentSha256", "segment", "segmentCount",
+]);
+
+/**
+ * Encode one server-authored repository frame as a single delimiter-safe token.
+ * Filenames are never interpolated into HTML comments: Git permits names such
+ * as `x--><!-- CONTINUITY_FILE ...`, so quoting alone cannot preserve a frame
+ * boundary. Base64url keeps the marker grammar unambiguous on every runtime.
+ */
+export function encodeRepositoryPacketMetadata(metadata: RepositoryPacketFrameMetadata): string {
+  const json = JSON.stringify(metadata);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+/** Fail-closed decoder for metadata recovered from a retrieval packet. */
+export function decodeRepositoryPacketMetadata(token: string): RepositoryPacketFrameMetadata | null {
+  if (!/^[A-Za-z0-9_-]{1,8192}$/.test(token)) return null;
+  try {
+    const normalized = token.replaceAll("-", "+").replaceAll("_", "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
+    if (!isPacketRecord(value)
+      || Object.keys(value).some((key) => !PACKET_METADATA_KEYS.has(key))
+      || Object.keys(value).length !== PACKET_METADATA_KEYS.size
+      || value.version !== REPOSITORY_PACKET_FRAME_VERSION
+      || typeof value.path !== "string"
+      || !isSafeRepositoryPath(value.path)
+      || typeof value.role !== "string"
+      || !PACKET_ROLES.has(value.role as EvidenceRole)
+      || typeof value.lifecycle !== "string"
+      || !PACKET_LIFECYCLES.has(value.lifecycle as EvidenceLifecycle)
+      || !Array.isArray(value.claimKinds)
+      || value.claimKinds.length > PACKET_CLAIM_KINDS.size
+      || !value.claimKinds.every((kind) => typeof kind === "string" && PACKET_CLAIM_KINDS.has(kind as ClaimKind))
+      || typeof value.authority !== "string"
+      || !PACKET_AUTHORITIES.has(value.authority as CanonAuthority)
+      || typeof value.closedWorld !== "boolean"
+      || !positiveSafeInteger(value.startLine)
+      || !positiveSafeInteger(value.endLine)
+      || value.endLine < value.startLine
+      || typeof value.blobSha !== "string"
+      || !FULL_SHA_PATTERN.test(value.blobSha)
+      || typeof value.contentSha256 !== "string"
+      || !/^[a-f\d]{64}$/i.test(value.contentSha256)
+      || !positiveSafeInteger(value.segment)
+      || !positiveSafeInteger(value.segmentCount)
+      || value.segment > value.segmentCount) return null;
+    return {
+      version: REPOSITORY_PACKET_FRAME_VERSION,
+      path: value.path,
+      role: value.role as EvidenceRole,
+      lifecycle: value.lifecycle as EvidenceLifecycle,
+      claimKinds: [...new Set(value.claimKinds as ClaimKind[])],
+      authority: value.authority as CanonAuthority,
+      closedWorld: value.closedWorld,
+      startLine: value.startLine,
+      endLine: value.endLine,
+      blobSha: value.blobSha.toLowerCase(),
+      contentSha256: value.contentSha256.toLowerCase(),
+      segment: value.segment,
+      segmentCount: value.segmentCount,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isPacketRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function positiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 /**
  * Repository text is embedded inside a server-authored packet. Neutralize the
  * packet's reserved control syntax in untrusted file bodies so a repository
@@ -236,6 +363,46 @@ export function escapeRepositoryPacketControlSyntax(text: string): string {
   return text
     .replace(/CONTINUITY_FILE/gi, (token) => `${token.slice(0, 10)}\u2060${token.slice(10)}`)
     .replace(/^## FILE:/gm, "## SOURCE FILE:");
+}
+
+export type SecretScanResult = { detected: boolean; kinds: string[] };
+
+/** High-confidence content scan applied before repository bytes are persisted
+ * or sent to a retrieval provider. It intentionally favors false negatives
+ * over silently exporting obvious live credentials; a production deployment
+ * should layer a maintained detector on top of these deterministic guards. */
+export function scanRepositoryTextForSecrets(text: string): SecretScanResult {
+  const kinds = new Set<string>();
+  const patterns: Array<[string, RegExp]> = [
+    ["private_key", /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/],
+    ["openai_key", /\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,}\b/],
+    ["github_token", /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{40,})\b/],
+    ["aws_access_key", /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/],
+    ["npm_token", /\bnpm_[A-Za-z0-9]{30,}\b/],
+    ["slack_token", /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/],
+  ];
+  for (const [kind, pattern] of patterns) if (pattern.test(text)) kinds.add(kind);
+
+  const assignment = /\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd)\b\s*[:=]\s*["']?([A-Za-z0-9_+\/=.-]{20,})["']?/gi;
+  for (const match of text.matchAll(assignment)) {
+    const value = match[1] ?? "";
+    if (/^(?:example|sample|placeholder|changeme|your[-_]|xxx+|test[-_])/i.test(value)) continue;
+    const classes = [/[a-z]/.test(value), /[A-Z]/.test(value), /\d/.test(value), /[_+\/=.-]/.test(value)]
+      .filter(Boolean).length;
+    if (classes >= 3 && new Set(value).size >= 12) kinds.add("credential_assignment");
+  }
+  return { detected: kinds.size > 0, kinds: [...kinds].sort() };
+}
+
+export function repositoryAllowedForCredential(
+  fullName: string,
+  token: string | undefined,
+  allowlist: string | undefined,
+): boolean {
+  if (!token?.trim()) return true;
+  const allowed = new Set((allowlist ?? "").split(",")
+    .map((value) => value.trim().toLowerCase()).filter(Boolean));
+  return allowed.has(fullName.trim().toLowerCase());
 }
 
 function balancedCandidateOrder(entries: RepositoryTreeEntry[]): RepositoryTreeEntry[] {
@@ -383,11 +550,18 @@ export class GitHubRepositoryProvider implements RepositoryProvider {
   private readonly fetcher: typeof fetch;
   private readonly token?: string;
   private readonly timeoutMs: number;
+  private readonly executionBudget: ConnectorExecutionBudget | null;
 
-  constructor(options: { token?: string; fetch?: typeof fetch; timeoutMs?: number } = {}) {
+  constructor(options: {
+    token?: string;
+    fetch?: typeof fetch;
+    timeoutMs?: number;
+    executionBudget?: ConnectorExecutionBudget;
+  } = {}) {
     this.token = options.token?.trim() || undefined;
     this.fetcher = options.fetch ?? fetch;
     this.timeoutMs = positiveInteger(options.timeoutMs ?? 0, 15_000);
+    this.executionBudget = options.executionBudget ?? null;
   }
 
   async resolveRevision(
@@ -398,7 +572,7 @@ export class GitHubRepositoryProvider implements RepositoryProvider {
     const payload = await this.request<{
       sha?: unknown;
       commit?: { tree?: { sha?: unknown }; committer?: { date?: unknown } };
-    }>(repository, `/commits/${encodeURIComponent(ref)}`);
+    }>(repository, `/commits/${encodeURIComponent(ref)}`, GITHUB_RESPONSE_LIMITS.commitJsonBytes, "github_resolve_revision");
     const commitSha = typeof payload.sha === "string" ? payload.sha : "";
     const treeSha = typeof payload.commit?.tree?.sha === "string" ? payload.commit.tree.sha : commitSha;
     if (!FULL_SHA_PATTERN.test(commitSha) || !FULL_SHA_PATTERN.test(treeSha)) {
@@ -423,6 +597,8 @@ export class GitHubRepositoryProvider implements RepositoryProvider {
     const payload = await this.request<{ tree?: unknown; truncated?: unknown }>(
       repository,
       `/git/trees/${revision.treeSha}?recursive=1`,
+      GITHUB_RESPONSE_LIMITS.treeJsonBytes,
+      "github_list_tree",
     );
     if (!Array.isArray(payload.tree)) {
       throw new RepositoryProviderError("GitHub returned a malformed repository tree.", "invalid_response");
@@ -454,6 +630,8 @@ export class GitHubRepositoryProvider implements RepositoryProvider {
     const payload = await this.request<{ content?: unknown; encoding?: unknown; size?: unknown; sha?: unknown }>(
       repository,
       `/git/blobs/${entry.sha}`,
+      blobResponseLimit(entry.size),
+      "github_read_blob",
     );
     if (payload.encoding !== "base64" || typeof payload.content !== "string") {
       throw new RepositoryProviderError("GitHub returned an unsupported blob encoding.", "invalid_response");
@@ -467,7 +645,12 @@ export class GitHubRepositoryProvider implements RepositoryProvider {
     return { bytes, providerHash, byteSize: bytes.byteLength };
   }
 
-  private async request<T>(repository: RepositoryReference, path: string): Promise<T> {
+  private async request<T>(
+    repository: RepositoryReference,
+    path: string,
+    maxResponseBytes: number,
+    phase: string,
+  ): Promise<T> {
     const url = `${GITHUB_API_ORIGIN}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}${path}`;
     const headers = new Headers({
       Accept: "application/vnd.github+json",
@@ -477,15 +660,35 @@ export class GitHubRepositoryProvider implements RepositoryProvider {
     if (this.token) headers.set("Authorization", `Bearer ${this.token}`);
     let response: Response;
     try {
+      const signal = this.executionBudget?.signalFor(phase, this.timeoutMs)
+        ?? AbortSignal.timeout(this.timeoutMs);
       response = await this.fetcher(url, {
         method: "GET",
         headers,
         redirect: "error",
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal,
       });
     } catch (error) {
+      if (this.executionBudget) {
+        const executionError = connectorAbortError(error, this.executionBudget, phase);
+        if (executionError) throw executionError;
+      }
       if (error instanceof RepositoryProviderError) throw error;
       throw new RepositoryProviderError("GitHub could not be reached for this snapshot.", "network_error", null, true);
+    }
+    let responseBytes: Uint8Array;
+    try {
+      responseBytes = await readGitHubResponseBytes(
+        response,
+        response.ok ? maxResponseBytes : GITHUB_RESPONSE_LIMITS.errorJsonBytes,
+      );
+    } catch (error) {
+      if (error instanceof RepositoryProviderError) throw error;
+      if (this.executionBudget) {
+        const executionError = connectorAbortError(error, this.executionBudget, phase);
+        if (executionError) throw executionError;
+      }
+      throw new RepositoryProviderError("GitHub response streaming failed.", "network_error", null, true);
     }
     if (response.status >= 300 && response.status < 400) {
       throw new RepositoryProviderError("GitHub returned a redirect that was not followed.", "redirect_rejected", response.status);
@@ -502,9 +705,65 @@ export class GitHubRepositoryProvider implements RepositoryProvider {
       throw new RepositoryProviderError("GitHub rejected the repository request.", "provider_error", response.status, response.status >= 500);
     }
     try {
-      return await response.json() as T;
+      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(responseBytes)) as T;
     } catch {
       throw new RepositoryProviderError("GitHub returned malformed JSON.", "invalid_response", response.status);
     }
   }
+}
+
+function blobResponseLimit(byteSize: number | null): number {
+  const boundedSize = typeof byteSize === "number" && Number.isSafeInteger(byteSize) && byteSize >= 0
+    ? Math.min(byteSize, DEFAULT_REPOSITORY_LIMITS.maxFileBytes)
+    : DEFAULT_REPOSITORY_LIMITS.maxFileBytes;
+  return Math.ceil(boundedSize * 4 / 3) + GITHUB_RESPONSE_LIMITS.blobEnvelopeBytes;
+}
+
+async function readGitHubResponseBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const declared = response.headers.get("content-length");
+  if (declared !== null) {
+    const parsed = Number(declared);
+    if (!Number.isSafeInteger(parsed) || parsed < 0) {
+      throw new RepositoryProviderError("GitHub returned an invalid Content-Length.", "invalid_response", response.status);
+    }
+    if (parsed > maxBytes) {
+      throw new RepositoryProviderError(
+        "GitHub returned a response larger than the connector safety limit.",
+        "response_too_large",
+        502,
+      );
+    }
+  }
+  if (!response.body) return new Uint8Array();
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try { await reader.cancel(); } catch { /* best-effort cancellation */ }
+        throw new RepositoryProviderError(
+          "GitHub returned a response larger than the connector safety limit.",
+          "response_too_large",
+          502,
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }

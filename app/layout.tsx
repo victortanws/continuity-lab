@@ -14,14 +14,14 @@ export async function generateMetadata(): Promise<Metadata> {
   const base = new URL(`${protocol}://${host}`);
   const title = "Continuity Lab — Make every story change explain itself";
   const description = "Upload a story or connect a repository. Continuity Lab uses GPT-5.6 to trace entities, rules, and causal dependencies back to cited evidence.";
-  const socialImage = new URL("/art/vcs-continuity-hero-v2.png", base).toString();
+  const socialImage = new URL("/og.png", base).toString();
 
   return {
     metadataBase: base,
     title,
     description,
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
-    openGraph: { title, description, type: "website", url: base, images: [{ url: socialImage, width: 1536, height: 1024, alt: "Continuity Lab — Can the story become true?" }] },
+    openGraph: { title, description, type: "website", url: base, images: [{ url: socialImage, width: 1672, height: 941, alt: "Continuity Lab — Can the story become true?" }] },
     twitter: { card: "summary_large_image", title, description, images: [socialImage] },
   };
 }
