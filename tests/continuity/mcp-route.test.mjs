@@ -60,7 +60,18 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
   ]);
   for (const tool of listed.body.result.tools) {
     assert.ok(tool.title);
-    assert.deepEqual(tool.inputSchema, continuityMcpTools[tool.name].inputSchema);
+    if (["continuity_answer_question", "continuity_trace_dependencies", "continuity_analyze_change"].includes(tool.name)) {
+      assert.deepEqual(tool.inputSchema.required,
+        continuityMcpTools[tool.name].inputSchema.required.filter(
+          (key) => key !== "projectId" && key !== "projectRevision",
+        ));
+      assert.equal(tool.inputSchema.properties.projectId.const, "vcs-demo");
+      assert.equal(tool.inputSchema.properties.projectId.default, "vcs-demo");
+      assert.equal(tool.inputSchema.properties.projectRevision.const, VCS_DEMO_REVISION);
+      assert.equal(tool.inputSchema.properties.projectRevision.default, VCS_DEMO_REVISION);
+    } else {
+      assert.deepEqual(tool.inputSchema, continuityMcpTools[tool.name].inputSchema);
+    }
     assert.equal(tool.outputSchema.additionalProperties, false);
     assert.ok(tool.outputSchema.required.includes("coverage"));
     assert.equal(tool.annotations.readOnlyHint, true);
@@ -230,8 +241,6 @@ test("the three MCP tools execute deterministic VCS analysis without network or 
 
 test("a natural capability question escalates to the bounded VCS dependency proof", async () => {
   const result = await call(toolCall("earn", "continuity_answer_question", {
-    projectId: "vcs-demo",
-    projectRevision: VCS_DEMO_REVISION,
     question: "Can the player earn $47,000 in the prototype?",
   }));
 

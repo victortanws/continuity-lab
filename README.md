@@ -88,6 +88,9 @@ The MCP advertises five read-only tools:
 
 - `continuity_answer_question`, `continuity_trace_dependencies`, and
   `continuity_analyze_change` operate on the immutable reviewed VCS sample.
+  A natural ChatGPT tool call needs only the question, target, or proposed
+  change; this hosted adapter supplies its fixed sample ID and revision. Older
+  clients may still send those two scope fields explicitly.
 - `continuity_compile_material` verifies exact claims and entity mentions from
   text ChatGPT passes from an attachment, paste, or repository-aware host.
 - `continuity_inspect_public_repository` pins a public GitHub repository to one

@@ -404,7 +404,7 @@ export async function POST(request: Request): Promise<Response> {
         name,
         title: TOOL_TITLES[name],
         description: continuityMcpTools[name].description,
-        inputSchema: continuityMcpTools[name].inputSchema,
+        inputSchema: exposedInputSchema(name),
         outputSchema: outputSchemaFor(name),
         annotations: annotationsFor(name),
         securitySchemes: NOAUTH_SECURITY_SCHEMES,
@@ -445,14 +445,15 @@ export async function POST(request: Request): Promise<Response> {
       }
     }
 
-    const inputError = validateToolArguments(name, argumentsValue);
+    const reviewedArguments = withReviewedSampleDefaults(argumentsValue);
+    const inputError = validateToolArguments(name, reviewedArguments);
     if (inputError) return rpcResult(id, toolError("invalid_arguments", inputError));
 
-    const scopeError = reviewedScopeError(argumentsValue);
+    const scopeError = reviewedScopeError(reviewedArguments);
     if (scopeError) return rpcResult(id, scopeError);
 
     try {
-      const result = await demoEngine.query(queryForTool(name, argumentsValue));
+      const result = await demoEngine.query(queryForTool(name, reviewedArguments));
       return rpcResult(id, toolSuccess(result));
     } catch (error) {
       const message = error instanceof ContinuityInputError
@@ -463,6 +464,40 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   return rpcError(id, -32601, `Method ${payload.method} is not supported by this stateless MCP transport.`, 404);
+}
+
+function exposedInputSchema(name: ExposedToolName) {
+  if (isContextTool(name)) return continuityMcpTools[name].inputSchema;
+  const schema = continuityMcpTools[name].inputSchema;
+
+  // These three tools are deliberately pinned to one immutable reviewed
+  // sample. Keep accepting the explicit v1 scope fields, but make a natural
+  // tool call reliable by supplying the only values this transport permits.
+  return {
+    ...schema,
+    required: schema.required.filter((key) => key !== "projectId" && key !== "projectRevision"),
+    properties: {
+      ...schema.properties,
+      projectId: {
+        ...schema.properties.projectId,
+        const: VCS_DEMO_PROJECT_ID,
+        default: VCS_DEMO_PROJECT_ID,
+      },
+      projectRevision: {
+        ...schema.properties.projectRevision,
+        const: VCS_DEMO_REVISION,
+        default: VCS_DEMO_REVISION,
+      },
+    },
+  };
+}
+
+function withReviewedSampleDefaults(input: JsonObject): JsonObject {
+  return {
+    ...input,
+    ...(!Object.hasOwn(input, "projectId") ? { projectId: VCS_DEMO_PROJECT_ID } : {}),
+    ...(!Object.hasOwn(input, "projectRevision") ? { projectRevision: VCS_DEMO_REVISION } : {}),
+  };
 }
 
 function queryForTool(name: ReviewedToolName, input: JsonObject): QueryRequest {
