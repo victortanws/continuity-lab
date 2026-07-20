@@ -12,8 +12,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const base = new URL(`${protocol}://${host}`);
-  const title = "Continuity Lab — Make every story change explain itself";
-  const description = "Upload a story or connect a repository. Continuity Lab uses GPT-5.6 to trace entities, rules, and causal dependencies back to cited evidence.";
+  const title = "Continuity Lab — Find story problems before they get expensive";
+  const description = "Add a script, notes, or a public repository. Ask what is true, what can happen next, or what else must change—and see the sources behind the answer.";
   const socialImage = new URL("/og.png", base).toString();
 
   return {
@@ -21,7 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title,
     description,
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
-    openGraph: { title, description, type: "website", url: base, images: [{ url: socialImage, width: 1672, height: 941, alt: "Continuity Lab — Can the story become true?" }] },
+    openGraph: { title, description, type: "website", url: base, images: [{ url: socialImage, width: 1672, height: 941, alt: "Continuity Lab story analysis" }] },
     twitter: { card: "summary_large_image", title, description, images: [socialImage] },
   };
 }

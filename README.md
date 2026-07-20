@@ -1,91 +1,170 @@
 # Continuity Lab
 
-An evidence-first consequence engine for stories, games, codebases, and long-form
-text. The Build Week demonstration uses Vibe Coder Simulator, while the core
-keeps project records, provider IDs, retrieval, and transport concerns separate.
+Continuity Lab helps people ask practical questions about a story, game,
+codebase, policy, archive, or other collection of material without losing track
+of what the material actually says.
 
-The application is designed to accept file uploads or synchronize a read-only
-GitHub snapshot when deployed with its storage and provider bindings. Repository
-sync resolves an exact commit, excludes sensitive and unsupported paths, stores
-immutable originals and a manifest, and optionally indexes a path-marked packet
-for GPT-5.6 Sol. Repository code is never executed. This repository's local
-state does not by itself prove that the same candidate is currently live.
+Add your files or a public GitHub repository. Ask what is true, what can happen
+next, whether two sources disagree, or what else must change if you revise part
+of the project. Continuity Lab gives a plain-language answer, shows the sources
+behind it, and keeps suggestions separate from established facts.
 
-## Prerequisites
+The worked example uses **Vibe Code Simulator**. Its founder must pay $47,000
+for his grandmother's operation by Day 24. The story promises that outcome, but
+the current game build is missing the event that takes the payment, records the
+result, and unlocks the later recovery scene. Continuity Lab finds that missing
+link and turns it into a concrete development plan.
 
-- Node.js `>=22.13.0`
+## Quick start guide
 
-## Quick Start
+### Try the worked example
+
+1. Open the site. The reviewed Vibe Code Simulator answer is already visible.
+2. Choose one of the example questions, such as:
+
+   - “Can the player actually save Grandma by Day 24?”
+   - “Who does ‘Grandma’ mean in the Day 8 customer message?”
+   - “If the operation costs $60,000, what else must change?”
+
+3. Read the direct answer first.
+4. Open the supporting sections to see:
+
+   - what must happen first;
+   - which step is missing;
+   - which people, events, rules, or items the question refers to;
+   - which passages support the answer; and
+   - what should be changed next.
+
+The light/dark control in the top navigation remembers your preference on that
+device.
+
+### Ask about your own project
+
+1. Choose **Upload files** to add text, Markdown, structured data, or a supported
+   searchable document. You can also paste text directly.
+2. Or choose **GitHub repository** and paste a public repository URL. Leave the
+   version field blank unless you need a particular branch, release, or commit.
+3. Ask a focused question. For example:
+
+   - “Do these two character descriptions refer to the same person?”
+   - “What must happen before this scene can occur?”
+   - “Do the design document and the code disagree about this price?”
+   - “If I remove this quest, which later scenes or tests may be affected?”
+
+4. Treat a missing answer honestly. If the source cannot be read, the relevant
+   passage was not supplied, or two possible identities cannot be separated,
+   Continuity Lab should say so rather than invent an answer.
+
+### Use it from ChatGPT
+
+The hosted site exposes a read-only MCP endpoint at
+`https://<host>/api/mcp`. Connect it as a ChatGPT app, select Continuity
+Lab in the conversation, attach or paste the relevant material, and ask your
+question normally. The MCP path lets ChatGPT provide the conversation while
+Continuity Lab checks quotations, identities, disagreements, and stated
+relationships. This keyless path does not require the user to enter an OpenAI
+API key into Continuity Lab.
+
+## Useful terminology
+
+- **Source:** a file, excerpt, repository file, record, or other piece of
+  material that may support an answer.
+- **Entity:** a person, character, place, event, rule, item, organization, or
+  other thing mentioned in the material. In the public interface we usually
+  call these “people and things.”
+- **Entity resolution:** deciding whether two names refer to the same thing.
+  Continuity Lab is allowed to say “possibly” or “ambiguous” instead of forcing
+  a bad merge.
+- **Dependency:** something that must happen before something else can happen,
+  or something later that relies on the earlier result.
+- **Canon or established truth:** what the accepted project material currently
+  establishes. A draft, suggestion, or generated possibility does not become
+  canon merely because an AI proposed it.
+- **Authority:** how much a source is allowed to establish. A current approved
+  specification should usually outweigh an old note or an unapproved idea.
+- **Pinned version:** the exact repository version used for an answer. Saving
+  that version prevents later code changes from silently changing what an old
+  answer referred to.
+- **Coverage:** how much of the relevant material was actually checked. “Not
+  found in the retrieved passages” is weaker than “not present in a complete,
+  reviewed list.”
+- **Reachability:** whether the required steps can really produce an outcome,
+  not merely whether the outcome is mentioned somewhere.
+
+## How we collaborated with Codex
+
+This project was developed as a long-running collaboration between the product
+owner and Codex rather than as a single generated application.
+
+### Where Codex accelerated the work
+
+- It inspected the evolving Slap the Heavens and Vibe Code Simulator projects
+  and helped identify the reusable idea beneath them: preserve truth, identity,
+  sequence, and consequences across many files and many development sessions.
+- It converted repeated manual continuity checks into an evidence compiler,
+  authority router, dependency reasoning layer, reviewed adapters, upload and
+  GitHub boundaries, MCP tools, security checks, and regression tests.
+- It compared naive model use with structured routing, recorded failures, and
+  iterated on the architecture instead of treating a persuasive answer as proof
+  that the system worked.
+- It built and repeatedly revised the site, deployment path, documentation, and
+  evaluation runner while keeping the reviewed architecture and sealed test
+  candidate separate from presentation-only changes.
+
+### Decisions made by the product owner
+
+The product owner set the core direction and repeatedly corrected the system
+when it became too narrow or too technical. Important decisions included:
+
+- generalize beyond one manhua or one game;
+- keep Vibe Code Simulator as a compelling worked example, not the definition
+  of the product;
+- accept incomplete and contradictory material without pretending it is clean;
+- separate proposals from established truth;
+- preserve evidence so every important conclusion can point back to a source;
+- make file uploads, repositories, ChatGPT/MCP use, causality, and future visual
+  audits part of one interoperable architecture;
+- optimize expensive review work without spawning unlimited checks; and
+- rewrite the interface in ordinary language when implementation terminology
+  leaked into the public experience.
+
+### How GPT-5.6 and Codex contributed
+
+GPT-5.6 is used as the bounded reasoning and synthesis layer when the API-backed
+route is configured. It receives question-relevant evidence and must return a
+validated answer contract rather than an unrestricted essay. Codex contributed
+the surrounding engineering: routing, evidence boundaries, deterministic
+checks, adapters, security controls, tests, deployment work, and the iterative
+product/design collaboration that made those capabilities usable.
+
+The central design choice is that GPT-5.6 does not get to declare truth by
+itself. The application preserves where information came from, what version it
+belongs to, whether sources disagree, and whether the available evidence is
+complete enough to support the requested conclusion.
+
+## Try it out in the repo
+
+### Run locally
+
+Prerequisite: Node.js `>=22.13.0`.
 
 ```bash
 npm install
 npm run dev
+npm run test:continuity
 npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+The project uses the existing vinext/Sites build and does not use
+`wrangler.jsonc`. The same hosted MCP implementation is available at `/api/mcp`
+and at `/mcp` for compatible direct-worker and local hosts.
 
-## What this does, in plain English
+To connect a deployed build to ChatGPT, follow the current
+[OpenAI Apps SDK connection guide](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt).
+`localhost` is useful for development, but a remote ChatGPT client needs a
+reachable HTTPS endpoint.
 
-Continuity Lab helps a person or an AI answer questions about what a body of
-material actually establishes. It keeps five jobs separate:
-
-1. It receives a small, question-relevant packet of text or inspects a bounded
-   public GitHub snapshot.
-2. It verifies that proposed claims and character/entity mentions are exact
-   spans in that material. Optional causal links must cite one supporting span,
-   an exact relationship cue, and two already accepted endpoint spans. A model
-   cannot create a citation or graph edge merely by naming one.
-3. It preserves source identity, time, authority, disagreement, and ambiguity
-   instead of flattening every sentence into one supposedly canonical answer.
-4. It uses the smallest safe route. A simple identity lookup skips graph work;
-   a causal, change, sequence, or multipart question may receive one bounded
-   in-memory graph pass.
-5. It returns evidence and coverage receipts so ChatGPT can answer clearly,
-   admit what could not be established, or propose a non-canonical repair.
-
-The reviewed VCS sample can therefore answer a question such as “Can the
-player earn $47,000 in the prototype?” as an implementation/reachability
-question, while the upload path can distinguish two people both called
-“Grandma” rather than silently merging them. A proposed new scene remains a
-proposal; none of these tools edits or promotes canon.
-
-## Try it out in the repo
-
-There are two useful entry paths. On Sites, both use the same HTTPS endpoint at
-`/api/mcp`. The implementation remains available at `/mcp` for compatible
-direct-worker and local hosts.
-
-### Run and connect the MCP app
-
-1. Install and test the repository:
-
-   ```bash
-   npm install
-   npm run dev
-   npm run test:continuity
-   ```
-
-2. Deploy it to an HTTPS URL that ChatGPT can reach. `localhost` is useful for
-   development, but a remote ChatGPT client cannot call a loopback address.
-3. In ChatGPT, enable developer mode under **Settings → Security and login**,
-   add the deployed `https://<host>/api/mcp` endpoint under **Settings → Plugins**,
-   and select the app from **+ → More** in a chat. These names follow the
-   current [OpenAI Apps SDK connection guide](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt).
-   If a client also exposes an `@Continuity Lab` shortcut, it may be used, but
-   the app picker is the documented discovery path.
-4. Ask in that ChatGPT conversation. Useful starting questions include:
-
-   - “Can the player earn $47,000 in the current VCS prototype? Show the
-     blocking dependency and evidence.”
-   - “Who is Grandma? Keep separate people separate and cite each mention.”
-   - “What must happen before this event, and which prerequisite is missing?”
-   - “Map only the prerequisites directly stated in these files. Show the
-     relationship cue and leave ‘or’ or ‘unless’ conditions unresolved.”
-   - “Do these two files disagree, or do they describe different points in
-     time?”
-   - “If I add this scene, what established facts, later payoffs, or production
-     assets could it affect?”
+## For the Technical-Minded
 
 ### General engine, current demonstration adapters
 
@@ -203,7 +282,7 @@ verification, anonymous commit pinning, and the $47,000 regression. Clients
 should branch on advertised capabilities and `contractVersion`, not parse the
 router version from prose.
 
-## Runtime shape
+### Runtime shape
 
 - `app/api/continuity/query`: revision-pinned multi-lane retrieval,
   query-scoped exact-span claim/entity compilation, typed authority and
@@ -261,7 +340,7 @@ verified atomic spans. A simple precondition, consequence, or before edge must
 also survive the exact relation boundary; deterministic reachability still
 requires a trusted complete transition registry or reviewed adapter.
 
-## Current capability boundary
+### Current capability boundary
 
 - **Upload and paste:** up to 12 files per browser selection, sent and stored
   sequentially; UTF-8 text and supported structured/document formats. PDF and
@@ -284,7 +363,7 @@ requires a trusted complete transition registry or reviewed adapter.
   anonymous public-GitHub inspector. Authenticated persisted/private workspaces
   and resource handlers are not implemented.
 
-## Hosted environment values
+### Hosted environment values
 
 - `CONTINUITY_TRUSTED_INGRESS_ORIGINS`: comma- or newline-separated exact HTTPS
   origins whose ingress strips caller-supplied identity headers and injects a
@@ -371,7 +450,7 @@ See `docs/PRODUCTION-AUDIT-PROTOCOL.md` for the deterministic protocol that can
 produce a panel/process review like the supplied manhua example once an
 upstream reviewer or vision adapter has supplied cited observations.
 
-## Workspace Auth Headers
+### Workspace Auth Headers
 
 OpenAI workspace sites can read the current user's email from
 `oai-authenticated-user-email`.
@@ -408,7 +487,7 @@ export default async function Home() {
 }
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+### Optional Dispatch-Owned ChatGPT Sign-In
 
 Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
 optional or required ChatGPT sign-in:
@@ -435,14 +514,14 @@ or enforce explicit server-side membership or allowlist checks.
 Use SIWC for account pages, user-specific dashboards, saved records, and write
 actions tied to the current ChatGPT user. Leave public content anonymous.
 
-## Useful Commands
+### Useful Commands
 
 - `npm run dev`: start local development
 - `npm run build`: verify the vinext build output
 - `npm test`: build the application and run the rendered and continuity suites
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
-## Learn More
+### Learn More
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
 - [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)

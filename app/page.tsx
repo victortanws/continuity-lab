@@ -9,6 +9,7 @@ type SourcePanel = "sample" | "upload" | "github" | "mcp";
 type EnginePreference = "demo" | "live";
 type AnalysisMode = "answer_question" | "evaluate_change" | "trace_dependencies";
 type UploadDocumentType = "narrative" | "reference" | "proposal";
+type Theme = "light" | "dark";
 
 type AnalysisReceipt = {
   question: string;
@@ -101,15 +102,64 @@ const SAMPLE_PROJECT_ID = "vcs-demo";
 const WORKSPACE_PROJECT_ID = "continuity-workspace";
 const DEFAULT_QUESTION = "Can the founder pay for the $47,000 operation by Day 24—and what must be built if not?";
 
+const REVIEWED_EXAMPLE_RECEIPT: AnalysisReceipt = {
+  question: DEFAULT_QUESTION,
+  projectId: SAMPLE_PROJECT_ID,
+  projectMode: "sample",
+  timeScope: "through the current Vibe Code Simulator demonstration build",
+  temporalAxis: "day",
+  storyPosition: 8,
+  targetPosition: 24,
+};
+
+const REVIEWED_EXAMPLE_ANSWER: UiAnswer = {
+  status: "NOT POSSIBLE YET",
+  tone: "danger",
+  headline: "The operation cannot happen in the current build.",
+  summary: "The story promises that the founder will pay $47,000 for Grandma's operation. The game can increase the player's cash, but it has no event that takes the payment, marks the operation as funded, and unlocks the later recovery scene.",
+  verdict: "UNREACHABLE",
+  confidence: "high",
+  revision: "reviewed-game-build",
+  scope: "The current story plan, money rules, event list, and ending requirements",
+  coverageClosure: "closed",
+  evidence: [
+    { evidenceId: "EV-VCS-NARRATIVE-CONTRACT", sourceId: "Story plan", locator: "Grandma operation goal", stance: "supports", supports: "The founder must pay $47,000 for Grandma's operation.", title: "Story plan" },
+    { evidenceId: "EV-VCS-ECONOMY", sourceId: "Economy rules", locator: "operation_cost and Day 24", stance: "context", supports: "The current balance uses a $47,000 target and a Day 24 deadline.", title: "Economy rules" },
+    { evidenceId: "EV-VCS-TRIGGER-REGISTRY", sourceId: "Game event list", locator: "operation completion events", stance: "opposes", supports: "No current event pays for the operation or records that it was funded.", title: "Game event list" },
+    { evidenceId: "EV-VCS-ENDING-CONTRACT", sourceId: "Ending requirements", locator: "post-operation scene", stance: "supports", supports: "The recovery scene expects a funded-operation result that the game never creates.", title: "Ending requirements" },
+  ],
+  entities: [
+    { id: "FOUNDER", name: "The founder", type: "player character", aliases: ["protagonist"], resolution: "resolved", evidenceIds: ["EV-VCS-NARRATIVE-CONTRACT"] },
+    { id: "CAST-27", name: "Grandma", type: "character", aliases: ["the founder's grandmother"], resolution: "resolved", evidenceIds: ["EV-VCS-NARRATIVE-CONTRACT"] },
+    { id: "GOAL-OPERATION", name: "$47,000 operation", type: "story goal", aliases: ["operation payment"], resolution: "resolved", evidenceIds: ["EV-VCS-NARRATIVE-CONTRACT", "EV-VCS-ECONOMY"] },
+  ],
+  dependencies: [
+    { from: "The player earns enough money", to: "The game takes the $47,000 payment", claimKey: "operation-payment", claimKind: "game rule", relation: "must enable", status: "missing", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"] },
+    { from: "The operation is marked as funded", to: "Grandma's recovery scene", claimKey: "operation-payoff", claimKind: "story requirement", relation: "must happen before", status: "blocked", evidenceIds: ["EV-VCS-ENDING-CONTRACT"] },
+  ],
+  conflicts: [],
+  checks: [],
+  blockers: ["There is no one-time event that pays for the operation and saves the result."],
+  path: [],
+  proposal: {
+    summary: "Add one clear payment event that connects the money system to the promised story outcome.",
+    assumptions: ["The player can reach the required balance by Day 24."],
+    requiredChanges: ["Add a one-time operation payment event.", "Remove $47,000 from the player's balance when the payment happens.", "Save an operation-funded result.", "Use that result to unlock Grandma's recovery scene.", "Add a test that proves the complete sequence works."],
+    downstreamRisks: ["The investment choice may leave too little money before Day 24.", "The ending can still fail if it checks a different result name."],
+  },
+  followUps: ["Who does “Grandma” mean in the Day 8 customer message?", "What must happen before the investment offer appears?", "If the operation costs $60,000, what else must change?"],
+  depth: "full",
+};
+
 const EMPTY_ANSWER: UiAnswer = {
   status: "READY",
   tone: "warning",
-  headline: "Ask a direct question—or test a consequential change.",
-  summary: "Continuity Lab starts with the smallest safe evidence route. It opens identity, authority, and causal checks only when the question requires them.",
+  headline: "Ask a question about your material.",
+  summary: "You can ask what is true, what can happen next, whether two sources disagree, or what else must change if you revise part of the project.",
   verdict: "INSUFFICIENT_EVIDENCE",
   confidence: "—",
-  revision: "Not traced yet",
-  scope: "No evidence has been evaluated yet.",
+  revision: "No answer yet",
+  scope: "No sources have been checked yet.",
   coverageClosure: "open",
   evidence: [],
   entities: [],
@@ -127,14 +177,14 @@ const EMPTY_REPOSITORY: RepositoryState = {
   phase: "idle",
   repository: "No repository connected",
   ref: "Default branch",
-  commit: "Not pinned yet",
-  message: "Paste a public GitHub URL to create an immutable evidence snapshot.",
+  commit: "Not saved yet",
+  message: "Paste a public GitHub link. We read selected files but never run the code.",
 };
 
 const SUGGESTED_QUESTIONS = [
-  "Which story state has a consumer but no producer?",
-  "What must happen before the investment offer can trigger?",
-  "What breaks if the operation target changes to $60,000?",
+  "Can the player actually save Grandma by Day 24?",
+  "Who does “Grandma” mean in the Day 8 customer message?",
+  "If the operation costs $60,000, what else must change?",
 ];
 
 const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
@@ -147,6 +197,8 @@ const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
   if (name === "file") return <svg {...common}><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/></svg>;
   if (name === "branch") return <svg {...common}><circle cx="6" cy="5" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 8c4 0 4-1 8-1"/></svg>;
   if (name === "download") return <svg {...common}><path d="M12 3v12m0 0 5-5m-5 5-5-5"/><path d="M5 21h14"/></svg>;
+  if (name === "moon") return <svg {...common}><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"/></svg>;
+  if (name === "sun") return <svg {...common}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>;
   return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/></svg>;
 };
 
@@ -155,43 +207,56 @@ export default function Home() {
   const [sourcePanel, setSourcePanel] = useState<SourcePanel>("sample");
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [analyzedQuestion, setAnalyzedQuestion] = useState(DEFAULT_QUESTION);
-  const [hasAnalyzed, setHasAnalyzed] = useState(false);
-  const [analysisReceipt, setAnalysisReceipt] = useState<AnalysisReceipt | null>(null);
+  const [hasAnalyzed, setHasAnalyzed] = useState(true);
+  const [analysisReceipt, setAnalysisReceipt] = useState<AnalysisReceipt | null>(REVIEWED_EXAMPLE_RECEIPT);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadDocumentType, setUploadDocumentType] = useState<UploadDocumentType>("narrative");
-  const [engineMode, setEngineMode] = useState<EngineMode>("ready");
-  const [answer, setAnswer] = useState<UiAnswer>(EMPTY_ANSWER);
+  const [engineMode, setEngineMode] = useState<EngineMode>("demonstration");
+  const [answer, setAnswer] = useState<UiAnswer>(REVIEWED_EXAMPLE_ANSWER);
   const [sources, setSources] = useState<StoredSource[]>([]);
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryRef, setRepositoryRef] = useState("");
   const [repository, setRepository] = useState<RepositoryState>(EMPTY_REPOSITORY);
   const [toast, setToast] = useState("");
   const [showFullTrace, setShowFullTrace] = useState(false);
+  const [theme, setTheme] = useState<Theme>("light");
 
   const activeProjectId = projectMode === "sample" ? SAMPLE_PROJECT_ID : WORKSPACE_PROJECT_ID;
   const workspaceEvidenceCount = sources.length + (repository.fileCount ?? 0);
   const sourceLabel = projectMode === "sample"
-    ? "VCS sample · reviewed evidence pack"
+    ? "Example ready"
     : workspaceEvidenceCount
-      ? `Live workspace · ${workspaceEvidenceCount} evidence item${workspaceEvidenceCount === 1 ? "" : "s"}`
-      : "Live workspace · awaiting sources";
+      ? `Your project · ${workspaceEvidenceCount} source item${workspaceEvidenceCount === 1 ? "" : "s"}`
+      : "Your project · add files to begin";
   const canRunReviewedLive = Boolean(
     analysisReceipt
     && analysisReceipt.projectMode === "sample"
     && analysisReceipt.question === DEFAULT_QUESTION
-    && analysisReceipt.timeScope === "through the current VCS demonstration build"
+    && analysisReceipt.timeScope === REVIEWED_EXAMPLE_RECEIPT.timeScope
     && analysisReceipt.temporalAxis === "day"
     && analysisReceipt.storyPosition === 8
     && analysisReceipt.targetPosition === 24,
   );
 
   const projectStats = useMemo(() => [
-    { value: answer.entities.length, label: "entities resolved" },
-    { value: answer.dependencies.length, label: "causal edges" },
-    { value: answer.conflicts.length, label: "conflicts" },
-    { value: answer.evidence.length, label: "cited sources" },
+    { value: answer.entities.length, label: "people and things found" },
+    { value: answer.dependencies.length, label: "dependencies found" },
+    { value: answer.conflicts.length, label: "conflicts found" },
+    { value: answer.evidence.length, label: "sources used" },
   ], [answer]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const stored = window.localStorage.getItem("continuity-theme");
+      if (stored === "light" || stored === "dark") {
+        setTheme(stored);
+        return;
+      }
+      if (window.matchMedia("(prefers-color-scheme: dark)").matches) setTheme("dark");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   const loadRepositoryStatus = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -252,7 +317,7 @@ export default function Home() {
       projectId: activeProjectId,
       projectMode,
       timeScope: projectMode === "sample"
-        ? "through the current VCS demonstration build"
+        ? REVIEWED_EXAMPLE_RECEIPT.timeScope
         : "the active commit-pinned workspace revision",
       ...(projectMode === "sample" ? { temporalAxis: "day", storyPosition: 8, targetPosition: inferTargetPosition(value) } : {}),
     };
@@ -354,8 +419,8 @@ export default function Home() {
       phase: "syncing",
       repository: requestedRepository,
       ref: repositoryRef.trim() || "Default branch",
-      commit: "Resolving revision…",
-      message: "Selecting permitted files and pinning one exact revision. Repository code is never executed.",
+      commit: "Choosing version…",
+      message: "Saving a read-only copy of the relevant files. Repository code is never run.",
     });
     try {
       const response = await fetch("/api/continuity/repositories", {
@@ -368,13 +433,13 @@ export default function Home() {
       const next = presentRepository(payload);
       if (next) setRepository(next);
       setProjectMode("workspace");
-      showToast("Commit-pinned repository snapshot created");
+      showToast("Repository connected");
     } catch (error) {
       setRepository({
         phase: "attention",
         repository: requestedRepository,
         ref: repositoryRef.trim() || "Default branch",
-        commit: "No snapshot created",
+        commit: "Nothing saved",
         message: error instanceof Error ? error.message : "The repository could not be synchronized.",
       });
     }
@@ -385,40 +450,62 @@ export default function Home() {
     window.setTimeout(() => setToast(""), 2800);
   }
 
+  function showReviewedExample(nextQuestion = DEFAULT_QUESTION) {
+    setProjectMode("sample");
+    setQuestion(nextQuestion);
+    const receipt = { ...REVIEWED_EXAMPLE_RECEIPT, question: nextQuestion, targetPosition: inferTargetPosition(nextQuestion) };
+    void analyze(nextQuestion, "demo", receipt);
+  }
+
+  function selectWorkspace() {
+    setProjectMode("workspace");
+    setHasAnalyzed(false);
+    setAnalysisReceipt(null);
+    setAnswer(EMPTY_ANSWER);
+    setEngineMode("ready");
+    setShowFullTrace(false);
+  }
+
+  function toggleTheme() {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    window.localStorage.setItem("continuity-theme", next);
+  }
+
   function exportTrace() {
     const blob = new Blob([JSON.stringify({ project: activeProjectId, question: analyzedQuestion, answer }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "continuity-lab-trace.json";
+    anchor.download = "continuity-lab-results.json";
     anchor.click();
     URL.revokeObjectURL(url);
-    showToast("Cited trace exported");
+    showToast("Results downloaded");
   }
 
   return (
-    <main>
+    <main data-theme={theme}>
       <nav className="topbar">
         <a className="brand" href="#top" aria-label="Continuity Lab home"><span className="brand-mark"><Icon name="branch" size={18}/></span><span>Continuity <i>Lab</i></span></a>
         <div className="nav-status"><span className="status-dot"/><span>{sourceLabel}</span></div>
-        <div className="nav-actions"><a href="#sources">Connect sources</a><button onClick={exportTrace} disabled={!hasAnalyzed}><Icon name="download" size={15}/> Export trace</button></div>
+        <div className="nav-actions"><a href="#sources">How it works</a><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}><Icon name={theme === "dark" ? "sun" : "moon"} size={15}/><span>{theme === "dark" ? "Light" : "Dark"}</span></button><button onClick={exportTrace} disabled={!hasAnalyzed}><Icon name="download" size={15}/> Download results</button></div>
       </nav>
 
       <section className="hero" id="top">
         <div className="hero-image" aria-hidden="true" />
         <div className="hero-inner">
           <div className="hero-copy-block">
-            <div className="eyebrow">CONTINUITY INTELLIGENCE FOR GAME TEAMS</div>
-            <h1>Can the story<br/><em>become true?</em></h1>
-            <p>Upload a script, story bible, PDF, or game repository. Continuity Lab maps the relevant characters, events, rules, and dependencies—then GPT-5.6 answers with citations and shows what would break.</p>
+            <div className="eyebrow">STORY QUESTIONS, ANSWERED FROM YOUR OWN MATERIAL</div>
+            <h1>Find story problems<br/><em>before they get expensive.</em></h1>
+            <p>Add your script, notes, or public game repository. Ask what is true, what can happen next, or what else must change if you edit a character, rule, cost, scene, or ending. Continuity Lab answers in plain language and shows the sources it used.</p>
           </div>
 
           <div className="question-card">
             <div className="mode-row">
-              <button className={projectMode === "sample" ? "active" : ""} onClick={() => setProjectMode("sample")}><span/> Try the VCS sample</button>
-              <button className={projectMode === "workspace" ? "active" : ""} onClick={() => setProjectMode("workspace")}><span/> Use my workspace</button>
+              <button className={projectMode === "sample" ? "active" : ""} onClick={() => showReviewedExample()}><span/> Show the example</button>
+              <button className={projectMode === "workspace" ? "active" : ""} onClick={selectWorkspace}><span/> Use my files</button>
             </div>
-            <label htmlFor="continuity-question">Ask what is true—or what a change would break</label>
+            <label htmlFor="continuity-question">Ask about the story or a planned change</label>
             <textarea id="continuity-question" value={question} onChange={(event) => setQuestion(event.target.value)} />
             <div className="question-footer">
               <div className={`engine-badge ${engineMode}`}><span/>{engineLabel(engineMode, projectMode)}</div>
@@ -426,28 +513,28 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="prompt-row"><span>Try a test</span>{SUGGESTED_QUESTIONS.map((prompt) => <button key={prompt} onClick={() => void analyze(prompt)}>{prompt}</button>)}</div>
+          <div className="prompt-row"><span>Example questions</span>{SUGGESTED_QUESTIONS.map((prompt) => <button key={prompt} onClick={() => showReviewedExample(prompt)}>{prompt}</button>)}</div>
         </div>
       </section>
 
       <section className="sources-section" id="sources">
         <div className="section-intro">
-          <div><div className="eyebrow dark">START WITH A SOURCE OF TRUTH</div><h2>Bring the project in once.<br/>Question the pinned revision.</h2></div>
-          <p>The browser does not “read GitHub live” on every question. An explicit sync creates a safe, immutable snapshot. Uploads, GitHub, the Site, and an MCP client all route into the same evidence service.</p>
+          <div><div className="eyebrow dark">QUICK START</div><h2>How it works</h2></div>
+          <p>Start with the worked example, upload your own files, or connect a public GitHub repository. Ask a question. Continuity Lab finds the relevant material, explains its answer, and suggests what to change when something is missing or inconsistent.</p>
         </div>
 
         <div className="pipeline" aria-label="Continuity Lab processing pipeline">
-          {["Connect source", "Pin revision", "Resolve evidence", "Reason with GPT-5.6", "Validate & cite"].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong>{index < 4 && <i>→</i>}</div>)}
+          {["Add your material", "Ask a question", "See the answer, sources, and next steps"].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong>{index < 2 && <i>→</i>}</div>)}
         </div>
 
         <div className="source-workspace">
           <div className="source-tabs" role="tablist">
-            {(["sample", "upload", "github", "mcp"] as SourcePanel[]).map((tab) => <button key={tab} role="tab" aria-selected={sourcePanel === tab} className={sourcePanel === tab ? "active" : ""} onClick={() => setSourcePanel(tab)}>{tab === "sample" ? "VCS sample" : tab === "upload" ? "Upload files" : tab === "github" ? "GitHub repository" : "MCP"}</button>)}
+            {(["sample", "upload", "github", "mcp"] as SourcePanel[]).map((tab) => <button key={tab} role="tab" aria-selected={sourcePanel === tab} className={sourcePanel === tab ? "active" : ""} onClick={() => setSourcePanel(tab)}>{tab === "sample" ? "Worked example" : tab === "upload" ? "Upload files" : tab === "github" ? "GitHub repository" : "Use in ChatGPT"}</button>)}
           </div>
 
           <div className="source-panel">
             {sourcePanel === "sample" && (
-              <SamplePanel onUse={() => { setProjectMode("sample"); setQuestion(DEFAULT_QUESTION); showToast("VCS sample selected"); }}/>
+              <SamplePanel onAsk={showReviewedExample}/>
             )}
             {sourcePanel === "upload" && (
               <UploadPanel sources={sources} isUploading={isUploading} documentType={uploadDocumentType} setDocumentType={setUploadDocumentType} onChange={addSource} onPaste={addPastedSource}/>
@@ -462,16 +549,16 @@ export default function Home() {
 
       <section className={`analysis-section ${hasAnalyzed ? "has-result" : ""}`} id="analysis">
         <div className="section-heading">
-          <div><div className="eyebrow dark">CITED CONTINUITY TRACE</div><h2>{hasAnalyzed ? analyzedQuestion : "The answer surface changes with the evidence."}</h2></div>
+          <div><div className="eyebrow dark">ANSWER AND EXPLANATION</div><h2>{hasAnalyzed ? analyzedQuestion : "Your answer will appear here."}</h2></div>
           <span className={`verdict ${answer.tone}`}><span/>{answer.status}</span>
         </div>
 
-        {engineMode === "demonstration" && <div className="honesty-banner"><strong>Validated sample mode</strong><span>{canRunReviewedLive ? "This answer uses the reviewed VCS fallback. The icon reruns this exact frozen receipt through the configured OpenAI API path." : "This answer uses the reviewed VCS fallback. Live API execution is exposed only for the frozen demonstration question."}</span>{canRunReviewedLive && <button className="live-test-icon" aria-label="Run this exact question live with the OpenAI API" onClick={() => void analyze(undefined, "live", analysisReceipt ?? undefined)} disabled={isAnalyzing}><Icon name="code" size={17}/></button>}</div>}
-        {engineMode === "unavailable" && <div className="honesty-banner attention"><strong>Live setup incomplete</strong><span>{analysisReceipt?.projectMode === "sample" ? "Add the OpenAI API key in Site settings to run this reviewed sample through GPT-5.6; the sample does not require repository indexing." : "The workspace remains stored safely. Add the OpenAI API key in Site settings to index it and activate GPT-5.6 retrieval."}</span></div>}
+        {engineMode === "demonstration" && <div className="honesty-banner"><strong>Reviewed example</strong><span>{canRunReviewedLive ? "This is the saved, human-reviewed answer. Use the icon to ask GPT-5.6 the same question when an API key is configured." : "This is a saved, human-reviewed answer from Vibe Code Simulator."}</span>{canRunReviewedLive && <button className="live-test-icon" aria-label="Run this exact question live with the OpenAI API" onClick={() => void analyze(undefined, "live", analysisReceipt ?? undefined)} disabled={isAnalyzing}><Icon name="code" size={17}/></button>}</div>}
+        {engineMode === "unavailable" && <div className="honesty-banner attention"><strong>Live answer unavailable</strong><span>{analysisReceipt?.projectMode === "sample" ? "The reviewed answer is still available. Add the OpenAI API key in Site settings only if you want to run the same question through GPT-5.6." : "Your material is still stored. Add the OpenAI API key in Site settings to search it and answer with GPT-5.6."}</span></div>}
 
         <div className="answer-grid">
           <article className="answer-card primary-answer">
-            <div className="answer-meta"><span>{answer.verdict.replaceAll("_", " ")}</span><span>{answer.confidence} confidence</span><span>{answer.coverageClosure} coverage</span><span>{shortRevision(answer.revision)}</span></div>
+            <div className="answer-meta"><span>{verdictLabel(answer.verdict)}</span><span>{answer.confidence} confidence</span><span>{coverageLabel(answer.coverageClosure)}</span><span>{shortRevision(answer.revision)}</span></div>
             <h3>{answer.headline}</h3>
             <p>{answer.summary}</p>
           </article>
@@ -482,79 +569,79 @@ export default function Home() {
 
         {answer.depth === "focused" && !showFullTrace ? (
           <article className="focused-answer-trace">
-            <div><span>DECISIVE CONTEXT</span><strong>{answer.entities.slice(0, 4).map((entity) => entity.name).join(" · ") || "No entity was confidently resolved"}</strong><small>{answer.evidence.slice(0, 3).map((item) => item.title || item.sourceId).join(" · ") || "No admissible citation was found"}</small></div>
-            <button type="button" onClick={() => setShowFullTrace(true)}>Show evidence trace <Icon name="arrow" size={14}/></button>
+            <div><span>KEY CONTEXT</span><strong>{answer.entities.slice(0, 4).map((entity) => entity.name).join(" · ") || "No person or item was identified confidently"}</strong><small>{answer.evidence.slice(0, 3).map((item) => item.title || item.sourceId).join(" · ") || "No supporting source was found"}</small></div>
+            <button type="button" onClick={() => setShowFullTrace(true)}>Show sources and dependencies <Icon name="arrow" size={14}/></button>
           </article>
         ) : <>
           <div className="inspection-grid">
             <article className="instrument-card dependency-card">
-              <div className="card-heading"><div><span>CAUSAL SLICE</span><h3>What depends on what</h3></div><small>{answer.dependencies.length || answer.path.length} relation{(answer.dependencies.length || answer.path.length) === 1 ? "" : "s"}</small></div>
+              <div className="card-heading"><div><span>WHAT MUST HAPPEN FIRST</span><h3>Steps, missing links, and effects</h3></div><small>{answer.dependencies.length || answer.path.length} connection{(answer.dependencies.length || answer.path.length) === 1 ? "" : "s"}</small></div>
               <DependencyView dependencies={answer.dependencies} path={answer.path}/>
-              {answer.blockers.length > 0 && <div className="blocker-list"><strong>Blockers</strong>{answer.blockers.map((item) => <p key={item}><span>!</span>{item}</p>)}</div>}
+              {answer.blockers.length > 0 && <div className="blocker-list"><strong>What is stopping it</strong>{answer.blockers.map((item) => <p key={item}><span>!</span>{item}</p>)}</div>}
             </article>
 
             <article className="instrument-card entity-card">
-              <div className="card-heading"><div><span>ENTITY RESOLUTION</span><h3>Who and what the answer means</h3></div><small>question-scoped</small></div>
-              <div className="entity-list">{answer.entities.length ? answer.entities.map((entity) => <div key={entity.id}><span>{entity.type} · {entity.resolution}</span><strong>{entity.name}</strong><small>{entity.id}{entity.aliases.length ? ` · ${entity.aliases.slice(0, 2).join(", ")}` : ""} · {entity.evidenceIds.length} source{entity.evidenceIds.length === 1 ? "" : "s"}</small></div>) : <EmptyState copy="Run a trace to resolve the entities relevant to this question."/>}</div>
+              <div className="card-heading"><div><span>PEOPLE AND THINGS MENTIONED</span><h3>What the question refers to</h3></div><small>for this question</small></div>
+              <div className="entity-list">{answer.entities.length ? answer.entities.map((entity) => <div key={entity.id}><span>{entity.type} · {resolutionLabel(entity.resolution)}</span><strong>{entity.name}</strong><small>{entity.aliases.length ? `Also called: ${entity.aliases.slice(0, 2).join(", ")} · ` : ""}{entity.evidenceIds.length} source{entity.evidenceIds.length === 1 ? "" : "s"}</small></div>) : <EmptyState copy="Ask a question and we will identify the relevant characters, places, events, rules, and items."/>}</div>
             </article>
           </div>
 
           <div className="inspection-grid lower">
             <article className="instrument-card evidence-card">
-              <div className="card-heading"><div><span>PROVENANCE</span><h3>Evidence you can inspect</h3></div><small>{answer.scope}</small></div>
-              <div className="evidence-list">{answer.evidence.length ? answer.evidence.map((item) => <details key={item.evidenceId}><summary><span className={`stance ${item.stance}`}>{item.stance}</span><span><strong>{item.title || item.sourceId}</strong><code>{item.locator}</code></span><Icon name="arrow" size={14}/></summary><div className="evidence-detail"><p>{item.supports}</p>{item.excerpt && <blockquote>{item.excerpt}</blockquote>}</div></details>) : <EmptyState copy="Every factual verdict will appear here with its source and locator."/>}</div>
+              <div className="card-heading"><div><span>SOURCE CHECK</span><h3>Why this is the answer</h3></div><small>{answer.scope}</small></div>
+              <div className="evidence-list">{answer.evidence.length ? answer.evidence.map((item) => <details key={item.evidenceId}><summary><span className={`stance ${item.stance}`}>{stanceLabel(item.stance)}</span><span><strong>{item.title || item.sourceId}</strong><code>{item.locator}</code></span><Icon name="arrow" size={14}/></summary><div className="evidence-detail"><p>{item.supports}</p>{item.excerpt && <blockquote>{item.excerpt}</blockquote>}</div></details>) : <EmptyState copy="The files and passages used for the answer will appear here."/>}</div>
             </article>
 
             <article className="instrument-card repair-card">
-              <div className="card-heading"><div><span>MINIMAL REPAIR</span><h3>Turn diagnosis into work</h3></div></div>
-              {answer.proposal ? <><p className="proposal-summary">{answer.proposal.summary}</p><div className="repair-list">{answer.proposal.requiredChanges.map((item, index) => <div key={item}><span>{String(index + 1).padStart(2, "0")}</span><p>{item}</p></div>)}</div>{answer.proposal.downstreamRisks.length > 0 && <details><summary>Downstream risks</summary>{answer.proposal.downstreamRisks.map((risk) => <p key={risk}>{risk}</p>)}</details>}</> : <EmptyState copy="When a change is possible, the engine returns assumptions, affected work, and downstream risks without silently promoting the proposal to canon."/>}
+              <div className="card-heading"><div><span>NEXT STEPS</span><h3>What to change</h3></div></div>
+              {answer.proposal ? <><p className="proposal-summary">{answer.proposal.summary}</p><div className="repair-list">{answer.proposal.requiredChanges.map((item, index) => <div key={item}><span>{String(index + 1).padStart(2, "0")}</span><p>{item}</p></div>)}</div>{answer.proposal.downstreamRisks.length > 0 && <details><summary>What else could be affected</summary>{answer.proposal.downstreamRisks.map((risk) => <p key={risk}>{risk}</p>)}</details>}</> : <EmptyState copy="If something needs to change, the suggested updates will appear here."/>}
             </article>
           </div>
 
-          {answer.checks.length > 0 && <article className="closure-audit"><div className="card-heading"><div><span>SEMANTIC CLOSURE</span><h3>Every routed check has an explicit result</h3></div><small>{answer.checks.filter((item) => item.status === "unknown").length} unknown</small></div><div className="closure-grid">{answer.checks.map((item) => <div key={item.check} className={item.status}><span>{item.status.replaceAll("_", " ")}</span><strong>{item.check.replaceAll("_", " ")}</strong><p>{item.finding}</p></div>)}</div></article>}
+          {answer.checks.length > 0 && <article className="closure-audit"><div className="card-heading"><div><span>WHAT WE CHECKED</span><h3>Known, conflicting, and missing information</h3></div><small>{answer.checks.filter((item) => item.status === "unknown").length} still unknown</small></div><div className="closure-grid">{answer.checks.map((item) => <div key={item.check} className={item.status}><span>{checkStatusLabel(item.status)}</span><strong>{checkLabel(item.check)}</strong><p>{item.finding}</p></div>)}</div></article>}
         </>}
 
         {answer.conflicts.length > 0 && <div className="conflict-strip"><strong>{answer.conflicts.length} conflict{answer.conflicts.length === 1 ? "" : "s"} found</strong>{answer.conflicts.map((conflict) => <p key={`${conflict.type}-${conflict.statement}`}><span>{conflict.severity}</span>{conflict.statement}</p>)}</div>}
-        {answer.followUps.length > 0 && <div className="follow-ups"><span>Keep testing</span>{answer.followUps.slice(0, 3).map((item) => <button key={item} onClick={() => void analyze(item)}>{item}<Icon name="arrow" size={14}/></button>)}</div>}
+        {answer.followUps.length > 0 && <div className="follow-ups"><span>Ask another question</span>{answer.followUps.slice(0, 3).map((item) => <button key={item} onClick={() => void analyze(item)}>{item}<Icon name="arrow" size={14}/></button>)}</div>}
       </section>
 
       <section className="build-week-section">
-        <div><div className="eyebrow">THE BUILD WEEK PROOF</div><h2>Source → conflict → repair.<br/><em>In one visible loop.</em></h2></div>
-        <div className="proof-points"><div><span>01</span><strong>Real input</strong><p>A fresh file or commit-pinned repository—not a pasted summary.</p></div><div><span>02</span><strong>Real reasoning</strong><p>GPT-5.6 operates on retrieved evidence and returns a strict answer contract.</p></div><div><span>03</span><strong>Useful output</strong><p>Exact citations, causal blockers, blast radius, and a repair packet.</p></div></div>
+        <div><div className="eyebrow">FROM QUESTION TO ACTION</div><h2>Know what is true.<br/><em>See what comes next.</em></h2></div>
+        <div className="proof-points"><div><span>01</span><strong>Bring your material</strong><p>Use a script, story bible, notes, or a public repository.</p></div><div><span>02</span><strong>Ask a real question</strong><p>Check a fact, a possible event, a contradiction, or a planned change.</p></div><div><span>03</span><strong>Get useful next steps</strong><p>See the answer, the supporting sources, and the work needed to make the idea fit.</p></div></div>
       </section>
 
-      <footer><div className="brand"><span className="brand-mark"><Icon name="branch" size={18}/></span><span>Continuity <i>Lab</i></span></div><p>Make every story change explain itself.</p><button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top ↑</button></footer>
+      <footer><div className="brand"><span className="brand-mark"><Icon name="branch" size={18}/></span><span>Continuity <i>Lab</i></span></div><p>Keep every story change grounded in what came before.</p><button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top ↑</button></footer>
       {toast && <div className="toast"><Icon name="check" size={16}/>{toast}</div>}
     </main>
   );
 }
 
-function SamplePanel({ onUse }: { onUse: () => void }) {
-  return <div className="sample-panel"><div className="source-symbol coral"><Icon name="branch" size={23}/></div><div><span className="panel-kicker">REVIEWED EXAMPLE</span><h3>VibeCode Simulator</h3><p>A deliberately small evidence pack for testing identity, reachability, trigger gaps, and counterfactual cost changes before connecting the real repository.</p><div className="sample-tags"><span>story contract</span><span>economy</span><span>runtime triggers</span><span>tests</span></div></div><button className="outline-button" onClick={onUse}>Use sample <Icon name="arrow" size={16}/></button></div>;
+function SamplePanel({ onAsk }: { onAsk: (question?: string) => void }) {
+  return <div className="sample-panel"><div className="source-symbol coral"><Icon name="branch" size={23}/></div><div><span className="panel-kicker">WORKED EXAMPLE</span><h3>Vibe Code Simulator</h3><p>The founder needs $47,000 for his grandmother&apos;s operation by Day 24. The story promises this outcome, but the current game build is missing a step that makes it happen. Choose a question to see how Continuity Lab explains the problem.</p><div className="sample-question-list">{SUGGESTED_QUESTIONS.map((question) => <button key={question} onClick={() => onAsk(question)}>{question}<Icon name="arrow" size={14}/></button>)}</div></div><button className="outline-button" onClick={() => onAsk()}>Show the main answer <Icon name="arrow" size={16}/></button></div>;
 }
 
 function UploadPanel({ sources, isUploading, documentType, setDocumentType, onChange, onPaste }: { sources: StoredSource[]; isUploading: boolean; documentType: UploadDocumentType; setDocumentType: (value: UploadDocumentType) => void; onChange: (event: ChangeEvent<HTMLInputElement>) => void; onPaste: (text: string) => Promise<boolean> }) {
   const [pastedText, setPastedText] = useState("");
   const typeExplanation = documentType === "narrative"
-    ? "Characters, events, rules, and intended causal structure. This is still reference-authority evidence, not approved canon."
+    ? "The story, characters, events, and rules as this document describes them. Uploading it does not automatically make every statement approved canon."
     : documentType === "proposal"
-      ? "A possible future, revision, or experiment. It stays proposed and cannot silently become current truth."
-      : "Background, research, commentary, or historical material used primarily for identity and context.";
+      ? "A possible change or experiment. It stays separate from the current version."
+      : "Background, research, commentary, or historical material used to explain context.";
   return <div className="upload-panel"><div className="upload-input-column"><label className="upload-classifier"><span>How should this document be read?</span><select value={documentType} disabled={isUploading} onChange={(event) => setDocumentType(event.target.value as UploadDocumentType)}><option value="narrative">Story or source text</option><option value="reference">Reference material</option><option value="proposal">Draft or proposal</option></select><small>{typeExplanation}</small></label><label className="upload-drop"><input type="file" multiple accept=".txt,.md,.markdown,.json,.yaml,.yml,.xml,.csv,.tsv,.pdf,.doc,.docx,.html,.htm,.pptx" onChange={(event) => void onChange(event)}/><span className="source-symbol blue"><Icon name="upload" size={23}/></span><strong>{isUploading ? "Storing and indexing…" : "Upload up to 12 sources"}</strong><p>TXT, Markdown, JSON, YAML, XML, CSV/TSV, HTML · operator preview: searchable PDF, DOC/DOCX, PPTX · 20 MB each</p><small>PDF/Office upload is allowlisted because its contents are not yet credential-scanned. XLSX, images, scanned/OCR-only PDFs, EPUB, and RTF need a dedicated extractor.</small></label><div className="paste-source"><textarea value={pastedText} onChange={(event) => setPastedText(event.target.value)} placeholder="Or paste a story, summary, cast list, ID table, or notes…"/><button type="button" disabled={isUploading || !pastedText.trim()} onClick={() => void onPaste(pastedText).then((stored) => { if (stored) setPastedText(""); })}>Store pasted text</button></div></div><div className="uploaded-list"><div className="panel-heading"><span>WORKSPACE SOURCES</span><strong>{sources.length}</strong></div>{sources.length ? sources.slice(0, 5).map((source) => <div key={source.id} title={source.indexError || "Provider indexing does not independently verify complete extraction."}><Icon name="file" size={17}/><span><strong>{source.logicalName || source.originalFilename || source.filename}</strong><small>{formatBytes(source.byteSize)} · {source.documentType} · {source.authority} · {(source.extractionStatus ?? "not_yet_verified").replaceAll("_", " ")}</small></span><em className={source.indexStatus}>{source.indexStatus.replaceAll("_", " ")}</em></div>) : <EmptyState copy="Each source will show storage/index status. Indexed means searchable by the provider; it does not prove that every page or entity was extracted."/>}</div></div>;
 }
 
 function GitHubPanel({ repository, repositoryUrl, repositoryRef, setRepositoryUrl, setRepositoryRef, onSubmit }: { repository: RepositoryState; repositoryUrl: string; repositoryRef: string; setRepositoryUrl: (value: string) => void; setRepositoryRef: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <div className="github-panel"><form onSubmit={(event) => void onSubmit(event)}><div className="panel-kicker">READ-ONLY GITHUB SNAPSHOT</div><h3>Connect a public GitHub repository.</h3><p>We save one exact version for analysis, so later code changes cannot silently alter an earlier answer. Leave the version blank to use the repository&apos;s current default branch.</p><label><span>Public repository URL</span><input type="url" placeholder="https://github.com/your-team/your-game" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} required/></label><label><span>Version to analyze <i>optional</i></span><input aria-describedby="repository-version-hint" placeholder="Latest default branch" value={repositoryRef} onChange={(event) => setRepositoryRef(event.target.value)}/><small id="repository-version-hint">Branch, release tag, or commit ID</small></label><button className="dark-button" disabled={repository.phase === "syncing" || !repositoryUrl.trim()}>{repository.phase === "syncing" ? <span className="spinner light"/> : <Icon name="branch" size={17}/>} {repository.phase === "syncing" ? "Creating snapshot…" : "Connect and create snapshot"}</button></form><div className={`repo-receipt ${repository.phase}`}><div className="receipt-head"><span/><strong>{repository.phase === "ready" ? "Snapshot ready" : repository.phase === "syncing" ? "Snapshot in progress" : repository.phase === "attention" ? "Needs attention" : "Awaiting repository"}</strong></div><dl><div><dt>Repository</dt><dd>{shortRepository(repository.repository)}</dd></div><div><dt>Version requested</dt><dd>{repository.ref}</dd></div><div><dt>Exact commit saved</dt><dd>{shortCommit(repository.commit)}</dd></div>{typeof repository.fileCount === "number" && <div><dt>Evidence files</dt><dd>{repository.fileCount}</dd></div>}<div><dt>Capability</dt><dd>{(repository.capability ?? "not connected").replaceAll("_", " ")}</dd></div></dl><p>{repository.message}</p></div></div>;
+  return <div className="github-panel"><form onSubmit={(event) => void onSubmit(event)}><div className="panel-kicker">CONNECT GITHUB</div><h3>Use a public GitHub repository.</h3><p>Paste the repository link. We save the exact version you choose, so every answer refers to the same files even if the repository changes later. Leave the version blank to use its current default branch.</p><label><span>Public repository URL</span><input type="url" placeholder="https://github.com/your-team/your-game" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} required/></label><label><span>Version to use <i>optional</i></span><input aria-describedby="repository-version-hint" placeholder="Current default branch" value={repositoryRef} onChange={(event) => setRepositoryRef(event.target.value)}/><small id="repository-version-hint">A branch, release tag, or commit ID</small></label><button className="dark-button" disabled={repository.phase === "syncing" || !repositoryUrl.trim()}>{repository.phase === "syncing" ? <span className="spinner light"/> : <Icon name="branch" size={17}/>} {repository.phase === "syncing" ? "Connecting…" : "Add repository"}</button></form><div className={`repo-receipt ${repository.phase}`}><div className="receipt-head"><span/><strong>{repository.phase === "ready" ? "Repository ready" : repository.phase === "syncing" ? "Connecting repository" : repository.phase === "attention" ? "Needs attention" : "Ready to connect"}</strong></div><dl><div><dt>Repository</dt><dd>{shortRepository(repository.repository)}</dd></div><div><dt>Version</dt><dd>{repository.ref}</dd></div><div><dt>Saved copy</dt><dd>{shortCommit(repository.commit)}</dd></div>{typeof repository.fileCount === "number" && <div><dt>Files available</dt><dd>{repository.fileCount}</dd></div>}<div><dt>Access</dt><dd>{repository.capability ? repository.capability.replaceAll("_", " ") : "not connected"}</dd></div></dl><p>{repository.message}</p></div></div>;
 }
 
 function McpPanel() {
-  return <div className="mcp-panel"><div><div className="source-symbol ink"><Icon name="code" size={23}/></div><span className="panel-kicker">ONE CORE, MORE THAN ONE SURFACE</span><h3>Ask what any evidence establishes—not only what happens in VCS.</h3><p>The stateless <code>/api/mcp</code> transport exposes five read-only tools over one domain-neutral evidence, identity, authority, and causality engine. VCS is the current reviewed demonstration adapter; uploaded text can describe a story, game, codebase, policy, workflow, archive, or another evidence-bearing domain, while public GitHub is one current ingestion connector. It makes no OpenAI API call, so ChatGPT can supply the conversational reasoning without an application API key. The client must explicitly pass attachment excerpts; private repositories remain disabled.</p></div><div className="mcp-contract"><span>KEYLESS · READ-ONLY · CONTINUITY.MCP.V1</span><code>continuity_answer_question(question)</code><code>continuity_trace_dependencies(target)</code><code>continuity_analyze_change(proposal)</code><code>continuity_compile_material(documents, claims, relations?)</code><code>continuity_inspect_public_repository(url, question)</code><small>Connect this host’s /api/mcp endpoint · router v3.3 is separate metadata · the original v3.2 tool contracts remain compatible.</small></div></div>;
+  return <div className="mcp-panel"><div><div className="source-symbol ink"><Icon name="code" size={23}/></div><span className="panel-kicker">USE IT FROM CHATGPT</span><h3>Ask questions without leaving your conversation.</h3><p>Connect this site as a ChatGPT app, attach or paste relevant material, and ask normally. The five read-only tools below can check exact quotations, keep similarly named people separate, show stated dependencies, and inspect a small public GitHub repository. This path does not require you to enter an OpenAI API key into Continuity Lab. Private repositories are not enabled yet.</p></div><div className="mcp-contract"><span>KEYLESS · READ-ONLY · CONTINUITY.MCP.V1</span><code>continuity_answer_question(question)</code><code>continuity_trace_dependencies(target)</code><code>continuity_analyze_change(proposal)</code><code>continuity_compile_material(documents, claims, relations?)</code><code>continuity_inspect_public_repository(url, question)</code><small>Connect this host’s /api/mcp endpoint · router v3.3 is separate metadata · the original v3.2 tool contracts remain compatible.</small></div></div>;
 }
 
 function DependencyView({ dependencies, path }: { dependencies: DependencyEdge[]; path: string[] }) {
   if (dependencies.length) return <div className="dependency-list">{dependencies.slice(0, 7).map((edge, index) => <div key={`${edge.from}-${edge.to}-${index}`} className={edge.status}><strong>{edge.from}</strong><span title={`${edge.claimKind} · ${edge.claimKey}`}><i/>{edge.relation}</span><strong>{edge.to}</strong><em>{edge.claimKind} · {edge.status}</em></div>)}</div>;
   if (path.length) return <div className="path-list">{path.map((item, index) => <div key={`${item}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{item}</p></div>)}</div>;
-  return <EmptyState copy="A dependency slice will appear here instead of a generic graph hairball."/>;
+  return <EmptyState copy="Ask a question to see what must happen first, what is missing, and what happens afterward."/>;
 }
 
 function EmptyState({ copy }: { copy: string }) {
@@ -563,9 +650,54 @@ function EmptyState({ copy }: { copy: string }) {
 
 function engineLabel(mode: EngineMode, projectMode: ProjectMode) {
   if (mode === "gpt-5.6-sol") return "GPT-5.6 Sol · live reasoning";
-  if (mode === "demonstration") return "Reviewed VCS sample";
+  if (mode === "demonstration") return "Reviewed example";
   if (mode === "unavailable") return "Live reasoning needs setup";
-  return projectMode === "sample" ? "VCS sample ready" : "Workspace selected";
+  return projectMode === "sample" ? "Example ready" : "Your files selected";
+}
+
+function verdictLabel(verdict: Verdict) {
+  const labels: Record<Verdict, string> = {
+    SUPPORTED: "Supported by the sources",
+    CONFLICT: "Sources disagree",
+    AMBIGUOUS: "Needs clarification",
+    UNREACHABLE: "Not possible yet",
+    INSUFFICIENT_EVIDENCE: "Not enough information",
+    PROPOSAL: "Suggested change",
+  };
+  return labels[verdict];
+}
+
+function coverageLabel(closure: UiAnswer["coverageClosure"]) {
+  if (closure === "closed") return "full rule list checked";
+  if (closure === "partial") return "some sources checked";
+  return "available sources checked";
+}
+
+function resolutionLabel(resolution: EntityReference["resolution"]) {
+  if (resolution === "resolved") return "identified";
+  if (resolution === "ambiguous") return "more than one possibility";
+  return "possible match";
+}
+
+function stanceLabel(stance: EvidenceReference["stance"]) {
+  if (stance === "supports") return "supports";
+  if (stance === "opposes") return "disagrees";
+  return "context";
+}
+
+function checkStatusLabel(status: AnalysisCheckFinding["status"]) {
+  if (status === "supported") return "confirmed";
+  if (status === "conflicted") return "conflict";
+  if (status === "not_applicable") return "not needed";
+  return "unknown";
+}
+
+function checkLabel(check: string) {
+  return check.replaceAll("_", " ")
+    .replace("entity identity", "who or what is meant")
+    .replace("temporal ordering", "when events happen")
+    .replace("downstream consumers", "later effects")
+    .replace("verification and unknowns", "remaining unknowns");
 }
 
 function presentAnswer(raw: Record<string, unknown>, retrievedEvidence: Array<Record<string, unknown>> = [], routing?: RoutingReceipt): UiAnswer {
@@ -600,10 +732,10 @@ function presentAnswer(raw: Record<string, unknown>, retrievedEvidence: Array<Re
   }));
   const proposalRaw = asRecord(raw.proposal);
   const proposal = proposalRaw ? { summary: stringValue(proposalRaw.summary, "Proposed repair"), assumptions: stringArray(proposalRaw.assumptions), requiredChanges: stringArray(proposalRaw.requiredChanges), downstreamRisks: stringArray(proposalRaw.downstreamRisks) } : null;
-  const status = verdict === "INSUFFICIENT_EVIDENCE" ? "EVIDENCE GAP" : verdict.replaceAll("_", " ");
+  const status = verdictLabel(verdict).toUpperCase();
   const tone: UiAnswer["tone"] = verdict === "CONFLICT" || verdict === "UNREACHABLE" ? "danger" : verdict === "SUPPORTED" ? "resolved" : "warning";
   const headlines: Record<Verdict, string> = {
-    SUPPORTED: "The current evidence supports this conclusion.", CONFLICT: "The active project evidence disagrees.", AMBIGUOUS: "The question resolves to more than one meaning.", UNREACHABLE: "The promise exists; its completion path does not.", INSUFFICIENT_EVIDENCE: "The available evidence cannot support a confident answer yet.", PROPOSAL: "The change is possible, but it has a dependency cost.",
+    SUPPORTED: "The current sources support this answer.", CONFLICT: "The current sources disagree.", AMBIGUOUS: "This question could mean more than one thing.", UNREACHABLE: "The intended outcome cannot happen in the current version.", INSUFFICIENT_EVIDENCE: "There is not enough information for a confident answer.", PROPOSAL: "The change could work, but other parts must change with it.",
   };
   const depth: UiAnswer["depth"] = routing?.presentationDepth === "focused" ? "focused" : "full";
   return {
@@ -634,7 +766,7 @@ function presentRepository(payload: Record<string, unknown>): RepositoryState | 
   return {
     phase, repository: repository ?? "Connected repository", ref: firstString(records, ["requestedRef", "ref", "branch", "tag"]) ?? "Default branch", commit: commit ?? "Pinned snapshot",
     fileCount: firstNumber(records, ["fileCount", "selectedFileCount", "entries"]), capability: firstString(records, ["capability", "indexStatus"]),
-    message: readMessage(payload) ?? (phase === "syncing" ? "The immutable snapshot is stored; the evidence index is still being prepared." : "Ask a question against this pinned revision."),
+    message: readMessage(payload) ?? (phase === "syncing" ? "The selected files are saved and are being prepared for questions." : "This exact repository version is ready for questions."),
   };
 }
 

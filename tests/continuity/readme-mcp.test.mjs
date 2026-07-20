@@ -9,6 +9,9 @@ test("README and MVP keep the keyless MCP entry point and compatibility boundary
   ]);
 
   assert.match(readme, /^## Try it out in the repo$/m);
+  assert.match(readme, /^## Quick start guide$/m);
+  assert.match(readme, /^## How we collaborated with Codex$/m);
+  assert.match(readme, /^## For the Technical-Minded$/m);
   assert.match(readme, /https:\/\/<host>\/api\/mcp/);
   assert.match(readme, /continuity_compile_material/);
   assert.match(readme, /continuity_inspect_public_repository/);
@@ -20,13 +23,16 @@ test("README and MVP keep the keyless MCP entry point and compatibility boundary
   assert.match(readme, /cannot.*automatically inherit.*attachment.*Git checkout/is);
 
   assert.match(page, /five read-only tools/);
-  assert.match(page, /domain-neutral evidence, identity, authority, and causality engine/);
-  assert.match(page, /VCS is the current reviewed demonstration adapter/);
-  assert.match(page, /Version to analyze/);
-  assert.match(page, /Branch, release tag, or commit ID/);
+  assert.match(page, /Ask questions without leaving your conversation/);
+  assert.match(page, /does not require you to enter an OpenAI API key/);
+  assert.match(page, /Version to use/);
+  assert.match(page, /A branch, release tag, or commit ID/);
   assert.match(page, /continuity_compile_material/);
   assert.match(page, /continuity_inspect_public_repository/);
-  assert.match(page, /makes no OpenAI API call/);
   assert.match(page, /host’s \/api\/mcp endpoint/);
   assert.doesNotMatch(page, /exposes three read-only analysis tools/);
+  assert.doesNotMatch(page, /Try the VCS sample/);
+  assert.doesNotMatch(page, /Which story state has a consumer but no producer/);
+  assert.doesNotMatch(page, /graph hairball/);
+  assert.doesNotMatch(page, /VibeCode Simulator/);
 });
