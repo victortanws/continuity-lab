@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("README and MVP explain the MCP entry point and its current access boundary", async () => {
+test("README and MVP explain the public MCP entry point and compatibility boundary", async () => {
   const [readme, page] = await Promise.all([
     readFile(new URL("../../README.md", import.meta.url), "utf8"),
     readFile(new URL("../../app/page.tsx", import.meta.url), "utf8"),
@@ -13,7 +13,7 @@ test("README and MVP explain the MCP entry point and its current access boundary
   assert.match(readme, /^## How we collaborated with Codex$/m);
   assert.match(readme, /^## For the Technical-Minded$/m);
   assert.match(readme, /https:\/\/continuity-lab-vcs\.synthesys\.chatgpt\.site\/api\/mcp/);
-  assert.match(readme, /owner-only private\s+preview/i);
+  assert.match(readme, /public, read-only, and ready/i);
   assert.match(readme, /continuity_compile_material/);
   assert.match(readme, /continuity_inspect_public_repository/);
   assert.match(readme, /present adapters, not the limits of\s+the product/i);
@@ -25,8 +25,8 @@ test("README and MVP explain the MCP entry point and its current access boundary
 
   assert.match(page, /Settings → Security and login/);
   assert.match(page, /Settings → Plugins/);
-  assert.match(page, /Private preview/);
-  assert.match(page, /ChatGPT cannot complete its server-to-server connection/);
+  assert.match(page, /Ready to connect/);
+  assert.match(page, /This MCP address is public so ChatGPT can reach it/);
   assert.match(page, /continuity-lab-vcs\.synthesys\.chatgpt\.site\/api\/mcp/);
   assert.match(page, /Version to use/);
   assert.match(page, /A branch, release tag, or commit ID/);

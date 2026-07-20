@@ -58,18 +58,17 @@ device.
 
 ### Use it from ChatGPT
 
-The MCP server exists, but the hosted site is currently an owner-only private
-preview. That access setting prevents ChatGPT from reaching the endpoint from
-its own servers. Do not expect the connection to complete until the site is
-made public or a supported authentication flow is added.
+The hosted MCP address is public, read-only, and ready for ChatGPT to reach from
+its own servers:
 
-Once one of those access paths is enabled:
+`https://continuity-lab-vcs.synthesys.chatgpt.site/api/mcp`
+
+To connect it:
 
 1. In ChatGPT, open **Settings → Security and login** and turn on
    **Developer mode**.
 2. Open **Settings → Plugins**, press **+**, and create a developer-mode app.
-3. Use the name **Continuity Lab** and paste this MCP address:
-   `https://continuity-lab-vcs.synthesys.chatgpt.site/api/mcp`.
+3. Use the name **Continuity Lab** and paste the MCP address above.
 4. Start a new chat, choose **+ → More → Continuity Lab**, then ask a question
    normally.
 

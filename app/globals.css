@@ -177,6 +177,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .connection-status { margin-top: 22px; padding: 15px 16px; color: #604b43; background: #fff2ec; border-left: 4px solid var(--coral); }
 .connection-status strong { display: block; margin-bottom: 5px; color: #8f3f31; font-size: 11px; }
 .connection-status p { color: inherit; font-size: 10px; line-height: 1.6; }
+.connection-status.ready { color: #285f4c; background: #edf8f3; border-color: var(--success); }
+.connection-status.ready strong { color: #176548; }
 .connect-guide { padding: 22px; background: #f6f6f2; border: 1px solid var(--line); }
 .connect-guide ol { margin: 15px 0 18px; padding: 0; list-style: none; }
 .connect-guide li { min-height: 45px; display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid #deded9; }
@@ -391,6 +393,8 @@ main[data-theme="dark"] .repo-receipt dd,
 main[data-theme="dark"] .repo-receipt > p { color: #aeb6c7; }
 main[data-theme="dark"] .connection-status { color: #ffd8ca; background: #2b1917; border-color: #ff8153; }
 main[data-theme="dark"] .connection-status strong { color: #ff9a78; }
+main[data-theme="dark"] .connection-status.ready { color: #c5f3df; background: #163127; border-color: #6fe0b3; }
+main[data-theme="dark"] .connection-status.ready strong { color: #7be7ba; }
 main[data-theme="dark"] .connect-guide { background: #111720; border-color: #3b4656; }
 main[data-theme="dark"] .connect-guide li { border-color: #303a48; }
 main[data-theme="dark"] .connect-guide li > span { color: #081014; background: #66e1de; }
