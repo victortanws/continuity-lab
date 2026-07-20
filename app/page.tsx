@@ -10,17 +10,37 @@ type ProjectSettings = {
   canonNote: string;
 };
 
-type AnalysisKind = "reachability" | "identity" | "relation" | "blast-radius" | "general";
-
 type Inquiry = {
   question: string;
   status: string;
   headline: string;
+  summary: string;
+  verdict: ApiVerdict;
+};
+
+type ApiVerdict = "SUPPORTED" | "CONFLICT" | "AMBIGUOUS" | "UNREACHABLE" | "INSUFFICIENT_EVIDENCE" | "PROPOSAL";
+
+type UiAnswer = {
+  status: string;
+  tone: "danger" | "warning" | "resolved";
+  headline: string;
+  summary: string;
+  evidence: string[];
+  verdict: ApiVerdict;
+};
+
+const INITIAL_ANSWER: UiAnswer = {
+  status: "READY TO TRACE",
+  tone: "warning",
+  headline: "The promise is visible. Ask the engine whether the path is real.",
+  summary: "Continuity Lab will pin this question to the VCS demo revision, retrieve the relevant story and runtime evidence, test the dependency path, and return a cited verdict.",
+  evidence: ["Narrative Contract", "Economy Table", "Trigger Graph"],
+  verdict: "INSUFFICIENT_EVIDENCE",
 };
 
 const DEFAULT_SETTINGS: ProjectSettings = {
   title: "Vibe Coder Simulator",
-  protagonist: "USER_0047",
+  protagonist: "FOUNDER",
   goalAmount: 47000,
   triggerFlag: "grandma-surgery-funded",
   canonNote:
@@ -48,20 +68,11 @@ const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
   return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>;
 };
 
-function classifyQuestion(question: string): AnalysisKind {
-  const q = question.toLowerCase();
-  if (q.includes("who is") || q.includes("tell me about")) return "identity";
-  if (q.includes("which grandma") || q.includes("related") || q.includes("user_0047")) return "relation";
-  if (q.includes("60,000") || q.includes("60000") || q.includes("what breaks") || q.includes("change")) return "blast-radius";
-  if (q.includes("fund") || q.includes("operation") || q.includes("surgery") || q.includes("reachable")) return "reachability";
-  return "general";
-}
-
 export default function Home() {
   const [settings, setSettings] = useState<ProjectSettings>(() => {
     if (typeof window === "undefined") return DEFAULT_SETTINGS;
     try {
-      const saved = window.localStorage.getItem("continuity-lab-project");
+      const saved = window.localStorage.getItem("continuity-lab-project-v2");
       return saved ? JSON.parse(saved) as ProjectSettings : DEFAULT_SETTINGS;
     } catch {
       return DEFAULT_SETTINGS;
@@ -77,35 +88,58 @@ export default function Home() {
   const [localSources, setLocalSources] = useState<{ id: string; name: string; detail: string; color: string }[]>([]);
   const [toast, setToast] = useState("");
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
+  const [answer, setAnswer] = useState<UiAnswer>(INITIAL_ANSWER);
+  const [engineMode, setEngineMode] = useState<"ready" | "demonstration" | "gpt-5.6-sol" | "unavailable">("ready");
 
-  const kind = useMemo(() => classifyQuestion(analyzedQuestion), [analyzedQuestion]);
   const money = useMemo(() => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(settings.goalAmount), [settings.goalAmount]);
   const allSources = [...BASE_SOURCES, ...localSources];
 
-  function analyze(nextQuestion?: string) {
+  async function analyze(nextQuestion?: string) {
     const value = nextQuestion ?? question;
     if (nextQuestion) setQuestion(nextQuestion);
     setIsAnalyzing(true);
-    window.setTimeout(() => {
-      const result = getAnswer(classifyQuestion(value), settings, money);
+    try {
+      const response = await fetch("/api/continuity/query", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId: "vcs-demo",
+          timeScope: "through the current playable build",
+          storyPosition: 8,
+          question: value,
+          proposedChange: settings.goalAmount === 47000 ? null : `Change the operation goal from $47,000 to ${money}.`,
+          conversation: inquiries.slice(-4).map((item) => ({ question: item.question, answer: item.summary, verdict: item.verdict })),
+        }),
+      });
+      const payload = await response.json() as { mode?: "demonstration" | "gpt-5.6-sol"; answer?: Record<string, unknown>; error?: string; message?: string };
+      if (!response.ok || !payload.answer) throw new Error(payload.message ?? payload.error ?? "The continuity service is unavailable.");
+      const result = presentAnswer(payload.answer);
       setAnalyzedQuestion(value);
-      setInquiries((current) => [...current.filter((item) => item.question !== value), { question: value, status: result.status, headline: result.headline }].slice(-4));
-      setIsAnalyzing(false);
+      setAnswer(result);
+      setEngineMode(payload.mode ?? "demonstration");
+      setInquiries((current) => [...current.filter((item) => item.question !== value), { question: value, status: result.status, headline: result.headline, summary: result.summary, verdict: result.verdict }].slice(-4));
       document.getElementById("analysis")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 520);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The continuity service is unavailable.";
+      setEngineMode("unavailable");
+      setAnalyzedQuestion(value);
+      setAnswer({ status: "SERVICE PAUSED", tone: "warning", headline: "The evidence engine could not complete this trace.", summary: `${message} No scripted answer has been substituted.`, evidence: [], verdict: "INSUFFICIENT_EVIDENCE" });
+    } finally {
+      setIsAnalyzing(false);
+    }
   }
 
   function saveProject() {
     setSettings(draft);
-    window.localStorage.setItem("continuity-lab-project", JSON.stringify(draft));
+    window.localStorage.setItem("continuity-lab-project-v2", JSON.stringify(draft));
     setShowEditor(false);
-    showToast("Project changes saved in this browser");
+    showToast("Scenario saved · source evidence unchanged");
   }
 
   function resetProject() {
     setDraft(DEFAULT_SETTINGS);
     setSettings(DEFAULT_SETTINGS);
-    window.localStorage.removeItem("continuity-lab-project");
+    window.localStorage.removeItem("continuity-lab-project-v2");
     setShowEditor(false);
     showToast("Demo project restored");
   }
@@ -126,19 +160,28 @@ export default function Home() {
     showToast("Project packet exported");
   }
 
-  function addSource(event: ChangeEvent<HTMLInputElement>) {
+  async function addSource(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const size = typeof reader.result === "string" ? reader.result.length : file.size;
-      setLocalSources((current) => [...current, { id: `LOCAL-${current.length + 1}`, name: file.name, detail: `${Math.max(1, Math.round(size / 1000))}k characters · local session`, color: "green" }]);
-      showToast(`${file.name} added to this local session`);
-    };
-    reader.readAsText(file);
+    const form = new FormData();
+    form.set("projectId", "vcs-demo");
+    form.set("authority", "reference");
+    form.set("file", file);
+    try {
+      const response = await fetch("/api/continuity/sources", { method: "POST", body: form });
+      const payload = await response.json() as { source?: { id?: string; sourceId?: string; indexStatus?: string }; indexStatus?: string; status?: string; message?: string; error?: string };
+      if (!response.ok) throw new Error(payload.message ?? payload.error ?? "Upload failed");
+      const source = payload.source ?? {};
+      const sourceId = source.id ?? source.sourceId ?? `SOURCE-${Date.now().toString(36).toUpperCase()}`;
+      const indexStatus = source.indexStatus ?? payload.indexStatus ?? payload.status ?? "stored";
+      setLocalSources((current) => [...current.filter((item) => item.name !== file.name), { id: sourceId, name: file.name, detail: `${Math.max(1, Math.round(file.size / 1000))} KB · ${String(indexStatus).replaceAll("_", " ")}`, color: "green" }]);
+      showToast(`${file.name} stored · ${String(indexStatus).replaceAll("_", " ")}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Upload failed");
+    } finally {
+      event.target.value = "";
+    }
   }
-
-  const answer = getAnswer(kind, settings, money);
 
   return (
     <main>
@@ -172,8 +215,8 @@ export default function Home() {
             <div className="question-label"><Icon name="spark" size={16}/> Ask across every source in the project</div>
             <textarea value={question} onChange={(event) => setQuestion(event.target.value)} aria-label="Question about project canon" />
             <div className="question-footer">
-              <div className="question-meta"><span className="pulse-dot"/> GPT-5.6 architecture · demo evaluator active</div>
-              <button className="button primary" onClick={() => analyze()} disabled={isAnalyzing || !question.trim()}>
+              <div className="question-meta"><span className="pulse-dot"/> {engineMode === "gpt-5.6-sol" ? "GPT-5.6 Sol · evidence retraced" : engineMode === "demonstration" ? "Validated demo core · API key pending" : engineMode === "unavailable" ? "Evidence service unavailable" : "Evidence engine · ready"}</div>
+              <button className="button primary" onClick={() => void analyze()} disabled={isAnalyzing || !question.trim()}>
                 {isAnalyzing ? <span className="spinner"/> : <Icon name="arrow" size={18}/>} {isAnalyzing ? "Tracing…" : "Trace consequences"}
               </button>
             </div>
@@ -181,8 +224,8 @@ export default function Home() {
 
           <div className="prompt-row">
             <span>Try</span>
-            {["Who is Grandma?", `Is she ${settings.protagonist}'s grandmother?`, "What breaks if surgery costs $60,000?"].map((prompt) => (
-              <button key={prompt} onClick={() => analyze(prompt)}>{prompt}</button>
+            {["Who is Grandma?", `How is Grandma related to ${settings.protagonist}?`, "What breaks if surgery costs $60,000?"].map((prompt) => (
+              <button key={prompt} onClick={() => void analyze(prompt)}>{prompt}</button>
             ))}
           </div>
         </div>
@@ -198,8 +241,8 @@ export default function Home() {
         <div className="inquiry-trail">
           <div className="trail-intro"><span className="trail-oracle"><img src="/art/vcs-oracle.png" alt=""/></span><div><small>PROJECT INQUIRY</small><strong>Ask follow-ups without losing the evidence trail.</strong></div></div>
           <div className="trail-items">
-            {(inquiries.length ? inquiries : [{ question: analyzedQuestion, status: answer.status, headline: answer.headline }]).map((item, index) => (
-              <button className={item.question === analyzedQuestion ? "active" : ""} key={`${item.question}-${index}`} onClick={() => analyze(item.question)}>
+            {(inquiries.length ? inquiries : [{ question: analyzedQuestion, status: answer.status, headline: answer.headline, summary: answer.summary, verdict: answer.verdict }]).map((item, index) => (
+              <button className={item.question === analyzedQuestion ? "active" : ""} key={`${item.question}-${index}`} onClick={() => void analyze(item.question)}>
                 <span>{String(index + 1).padStart(2, "0")}</span><div><strong>{item.question}</strong><small>{item.status} · {item.headline}</small></div>
               </button>
             ))}
@@ -219,7 +262,7 @@ export default function Home() {
 
           <article className="result-card character-result">
             <div className="portrait-ring"><img src="/art/vcs-grandma-preop.png" alt="Grandma, an older woman in a terracotta cardigan"/></div>
-            <div><div className="result-kicker">ENTITY · CAST-27</div><h3>Grandma</h3><p>The Founder&apos;s sharp, independent grandmother. Her failing eyesight—not her identity—is the problem the story promises to resolve.</p></div>
+            <div><div className="result-kicker">PRIMARY REFERENT · CAST-27</div><h3>Grandma</h3><p>The Founder&apos;s sharp, independent grandmother. She is not USER_0047&apos;s grandmother; that second woman remains a distinct person even when a UI binding confuses them.</p></div>
           </article>
         </div>
 
@@ -298,15 +341,15 @@ export default function Home() {
       </section>
 
       <section className="sources-section">
-        <div className="sources-head"><div><div className="eyebrow dark">PROJECT MEMORY</div><h2>Grounded in sources you control.</h2></div><label className="button outline"><Icon name="upload" size={17}/> Add text or JSON<input type="file" accept=".txt,.md,.json,.yaml,.yml" onChange={addSource}/></label></div>
+        <div className="sources-head"><div><div className="eyebrow dark">PROJECT MEMORY</div><h2>Grounded in sources you control.</h2></div><label className="button outline"><Icon name="upload" size={17}/> Add a source<input type="file" accept=".txt,.md,.json,.yaml,.yml,.pdf,.html,.docx,.epub" onChange={(event) => void addSource(event)}/></label></div>
         <div className="source-grid">{allSources.map((source) => <div className="source-item" key={source.id}><span className={`source-icon ${source.color}`}><Icon name="link" size={18}/></span><div><small>{source.id}</small><strong>{source.name}</strong><p>{source.detail}</p></div><span className="source-check"><Icon name="check" size={14}/></span></div>)}</div>
-        <p className="local-note">Uploaded sources remain in this browser session. This MVP demonstrates the editable product surface; production ingestion would connect these records to the live reasoning service.</p>
+        <p className="local-note">Uploads are versioned as immutable project evidence. Their status tells you whether they are stored only or also searchable by the reasoning service; a stored file is never presented as indexed.</p>
       </section>
 
       <footer><div className="brand"><span className="brand-mark"><Icon name="spark" size={18}/></span><span>Continuity <i>Lab</i></span></div><p>Truth that can move—without drifting.</p><button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top ↑</button></footer>
 
       {showEditor && <div className="modal-backdrop" onMouseDown={() => setShowEditor(false)}><section className="editor" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="editor-head"><div><div className="eyebrow dark">EDITABLE DEMO</div><h2>Project contract</h2><p>Change the canonical variables that drive this trace.</p></div><button className="icon-button" onClick={() => setShowEditor(false)} aria-label="Close editor"><Icon name="x"/></button></div>
+        <div className="editor-head"><div><div className="eyebrow dark">PROPOSAL SANDBOX</div><h2>Scenario variables</h2><p>Explore a change without silently rewriting project truth.</p></div><button className="icon-button" onClick={() => setShowEditor(false)} aria-label="Close editor"><Icon name="x"/></button></div>
         <div className="form-grid">
           <label><span>Project title</span><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })}/></label>
           <label><span>Protagonist ID</span><input value={draft.protagonist} onChange={(e) => setDraft({ ...draft, protagonist: e.target.value })}/></label>
@@ -314,8 +357,8 @@ export default function Home() {
           <label><span>Completion flag</span><input value={draft.triggerFlag} onChange={(e) => setDraft({ ...draft, triggerFlag: e.target.value })}/></label>
           <label className="full"><span>Canonical note</span><textarea value={draft.canonNote} onChange={(e) => setDraft({ ...draft, canonNote: e.target.value })}/></label>
         </div>
-        <div className="editor-note"><Icon name="clock" size={17}/><p>This prototype saves edits locally. A production version would version each approved change and recalculate its blast radius.</p></div>
-        <div className="editor-actions"><button className="button ghost" onClick={resetProject}>Reset demo</button><button className="button primary" onClick={saveProject}>Save &amp; retrace <Icon name="arrow" size={17}/></button></div>
+        <div className="editor-note"><Icon name="clock" size={17}/><p>This sandbox saves a local proposal. It does not alter source evidence or canon; approval would create a new revision and recalculate the blast radius.</p></div>
+        <div className="editor-actions"><button className="button ghost" onClick={resetProject}>Reset demo</button><button className="button primary" onClick={saveProject}>Save scenario <Icon name="arrow" size={17}/></button></div>
       </section></div>}
       {toast && <div className="toast"><Icon name="check" size={17}/>{toast}</div>}
     </main>
@@ -342,10 +385,31 @@ function WorkPanel({ tab, settings, money }: { tab: string; settings: ProjectSet
   return <div className="work-panel"><div className={`work-number ${panel.accent}`}>{panel.number}</div><div className="work-copy"><h3>{panel.title}</h3><p>{panel.copy}</p></div><div className="task-list">{panel.tasks.map((task) => <div key={task}><Icon name="check" size={15}/><span>{task}</span></div>)}</div></div>;
 }
 
-function getAnswer(kind: AnalysisKind, settings: ProjectSettings, money: string) {
-  if (kind === "identity") return { status: "2 MATCHES", tone: "warning", headline: "“Grandma” is ambiguous across the project.", summary: `The source packet contains two grandmother roles: CAST-27, ${settings.protagonist}'s grandmother and the holder of the ${money} operation stake; and a secondary customer's grandmother mentioned in generated dialogue. The active story obligation belongs to CAST-27.`, evidence: ["CAST-27", "Narrative Contract", "Dialogue Index"] };
-  if (kind === "relation") return { status: "RESOLVED", tone: "resolved", headline: `This is ${settings.protagonist}'s grandmother: CAST-27.`, summary: "The relationship is supported by the Day 8 call, the cast record, and the surgery obligation. A screenshot match should still be treated as an identification with evidence—not as visual certainty alone.", evidence: ["Day 8 event", "CAST-27", "Asset identity"] };
-  if (kind === "blast-radius") return { status: "4 IMPACTS", tone: "warning", headline: "Changing the price changes more than one line of dialogue.", summary: "A $60,000 goal raises the required income curve, delays the eligible trigger window, changes investment pacing, and invalidates the current operation payoff tests. The story remains possible, but the economy must be rebalanced.", evidence: ["Economy Table", "Trigger Tests", "Ending Contract"] };
-  if (kind === "general") return { status: "PARTIAL", tone: "warning", headline: "The project contains relevant evidence, but the question needs a sharper target.", summary: "Continuity Lab found related entities and state transitions. Name a character, event, amount, or proposed change to receive a concrete conflict and dependency trace.", evidence: ["Entity Index", "Event Graph", "Source Packet"] };
-  return { status: "UNREACHABLE", tone: "danger", headline: "Not yet. The obligation is canonical; its completion path is not.", summary: `${settings.canonNote} The current build can accumulate days and generate plausible events, but no verified transition produces the ${settings.triggerFlag} state.`, evidence: ["Day 8 event", "Economy Table", "Trigger Graph", "Story Contract"] };
+function presentAnswer(raw: Record<string, unknown>): UiAnswer {
+  const verdict = (typeof raw.verdict === "string" ? raw.verdict : "INSUFFICIENT_EVIDENCE") as ApiVerdict;
+  const reachability = raw.reachability && typeof raw.reachability === "object" ? raw.reachability as Record<string, unknown> : {};
+  const entities = Array.isArray(raw.entities) ? raw.entities as Array<Record<string, unknown>> : [];
+  const references = Array.isArray(raw.evidence) ? raw.evidence as Array<Record<string, unknown>> : [];
+  const status = verdict === "AMBIGUOUS" ? `${Math.max(2, entities.length)} MATCHES`
+    : verdict === "CONFLICT" ? "CONFLICT"
+      : verdict === "UNREACHABLE" ? "UNREACHABLE"
+        : verdict === "SUPPORTED" ? "SUPPORTED"
+          : verdict === "PROPOSAL" ? "PROPOSAL"
+            : "EVIDENCE GAP";
+  const tone: UiAnswer["tone"] = verdict === "UNREACHABLE" || verdict === "CONFLICT" ? "danger" : verdict === "SUPPORTED" ? "resolved" : "warning";
+  const headline = verdict === "UNREACHABLE" ? "The obligation is true; the completion path is not yet reachable."
+    : verdict === "AMBIGUOUS" ? "The name resolves to more than one person."
+      : verdict === "CONFLICT" ? "Active project evidence disagrees."
+        : verdict === "PROPOSAL" ? "The change is possible, but it carries a dependency cost."
+          : verdict === "SUPPORTED" ? "The project evidence supports this conclusion."
+            : "The available evidence cannot support a confident answer yet.";
+  const coverage = typeof reachability.completenessScope === "string" && reachability.completenessScope ? ` Causal scope: ${reachability.completenessScope}.` : "";
+  return {
+    status,
+    tone,
+    headline,
+    summary: `${typeof raw.answer === "string" ? raw.answer : "No answer was returned."}${coverage}`,
+    evidence: references.map((item) => `${String(item.sourceId ?? "Source")} · ${String(item.locator ?? "locator unavailable")}`).slice(0, 5),
+    verdict,
+  };
 }

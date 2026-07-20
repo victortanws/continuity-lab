@@ -14,8 +14,10 @@ test("server-renders the Continuity Lab MVP", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
   assert.match(html, /Continuity Lab/);
-  assert.match(html, /Ask whether a story/);
+  assert.match(html, /Ask across every source/);
   assert.match(html, /Grandma/);
-  assert.match(html, /UNREACHABLE/);
+  assert.match(html, /READY TO TRACE/);
+  assert.match(html, /Evidence engine · ready/);
+  assert.doesNotMatch(html, /demo evaluator active/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
 });
