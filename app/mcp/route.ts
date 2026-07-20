@@ -401,7 +401,11 @@ export async function POST(request: Request): Promise<Response> {
         outputSchema: outputSchemaFor(name),
         annotations: annotationsFor(name),
         securitySchemes: NOAUTH_SECURITY_SCHEMES,
-        _meta: { securitySchemes: NOAUTH_SECURITY_SCHEMES },
+        _meta: {
+          securitySchemes: NOAUTH_SECURITY_SCHEMES,
+          "continuity/contractVersion": CONTINUITY_MCP_CONTRACT_VERSION,
+          "continuity/routerVersion": AUTHORITY_ROUTER_VERSION,
+        },
       })),
     });
   }

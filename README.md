@@ -146,13 +146,14 @@ automatic natural-language causality theorem prover.
 ### v3.2 to v3.3 compatibility
 
 The public transport remains MCP `2025-06-18`, and its stable data contract is
-`continuity.mcp.v1`. Authority-router version `3.3.0` is returned as separate
-metadata, so router changes do not rename tools or resource identities. The
-three v3.2 reviewed-sample tools keep their existing names, inputs, and output
-shape; v3.3 adds the two context tools. Tests exercise initialization, all five
-descriptors, the original VCS calls, exact upload verification, anonymous
-commit pinning, and the $47,000 regression. Clients should branch on advertised
-capabilities and `contractVersion`, not parse the router version from prose.
+`continuity.mcp.v1`. Authority-router version `3.3.0` is advertised separately
+as namespaced tool metadata, so router changes do not rename tools or resource
+identities. The three v3.2 reviewed-sample tools keep their existing names,
+inputs, and output shape; v3.3 adds the two context tools. Tests exercise
+initialization, all five descriptors, the original VCS calls, exact upload
+verification, anonymous commit pinning, and the $47,000 regression. Clients
+should branch on advertised capabilities and `contractVersion`, not parse the
+router version from prose.
 
 ## Runtime shape
 

@@ -68,6 +68,8 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
     assert.equal(tool.annotations.idempotentHint, tool.name !== "continuity_inspect_public_repository");
     assert.deepEqual(tool.securitySchemes, [{ type: "noauth" }]);
     assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
+    assert.equal(tool._meta["continuity/contractVersion"], "continuity.mcp.v1");
+    assert.equal(tool._meta["continuity/routerVersion"], "3.3.0");
     if (tool.inputSchema.properties.projectId) {
       assert.equal(tool.inputSchema.properties.projectId.maxLength, 128);
     }
