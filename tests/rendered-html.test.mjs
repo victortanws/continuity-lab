@@ -8,6 +8,12 @@ async function render() {
   return worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
 }
 
+async function builtWorker() {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}-mcp`);
+  return (await import(workerUrl.href)).default;
+}
+
 test("server-renders the Continuity Lab MVP", async () => {
   const response = await render();
   assert.equal(response.status, 200);
@@ -23,4 +29,21 @@ test("server-renders the Continuity Lab MVP", async () => {
   assert.doesNotMatch(html, /Grandma Asset Record/);
   assert.doesNotMatch(html, /demo evaluator active/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
+});
+
+test("the built worker exposes the Sites-compatible MCP alias", async () => {
+  const worker = await builtWorker();
+  const response = await worker.fetch(new Request("http://localhost/api/mcp", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "MCP-Protocol-Version": "2025-06-18",
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "list", method: "tools/list", params: {} }),
+  }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.result.tools.length, 5);
+  assert.equal(body.result.tools[0]._meta["continuity/contractVersion"], "continuity.mcp.v1");
 });

@@ -9,7 +9,7 @@ test("README and MVP keep the keyless MCP entry point and compatibility boundary
   ]);
 
   assert.match(readme, /^## Try it out in the repo$/m);
-  assert.match(readme, /https:\/\/<host>\/mcp/);
+  assert.match(readme, /https:\/\/<host>\/api\/mcp/);
   assert.match(readme, /continuity_compile_material/);
   assert.match(readme, /continuity_inspect_public_repository/);
   assert.match(readme, /does not require\s+you or the user to put an OpenAI API\s+key/i);
@@ -21,5 +21,6 @@ test("README and MVP keep the keyless MCP entry point and compatibility boundary
   assert.match(page, /continuity_compile_material/);
   assert.match(page, /continuity_inspect_public_repository/);
   assert.match(page, /makes no OpenAI API call/);
+  assert.match(page, /host’s \/api\/mcp endpoint/);
   assert.doesNotMatch(page, /exposes three read-only analysis tools/);
 });

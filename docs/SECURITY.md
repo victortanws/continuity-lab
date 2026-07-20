@@ -102,7 +102,8 @@ to this evidence-routing product rather than copied as application canon.
   arbitrary source text is not treated as a complete graph.
 - Every query pins immutable revision membership; later uploads cannot enter
   that revision's evidence result.
-- The stateless `/mcp` transport advertises only read-only/idempotent tools,
+- The stateless MCP transport (`/api/mcp` on Sites, with `/mcp` retained for
+  compatible direct-worker hosts) advertises only read-only/idempotent tools,
   enforces a 32 KiB JSON boundary, does not call OpenAI, and never mutates or
   promotes project state. Its three reviewed-VCS tools remain pinned to the
   immutable sample and reject arbitrary project/revision labels.

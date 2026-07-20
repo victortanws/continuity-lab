@@ -51,7 +51,9 @@ proposal; none of these tools edits or promotes canon.
 
 ## Try it out in the repo
 
-There are two useful entry paths. Both use the same HTTPS endpoint at `/mcp`.
+There are two useful entry paths. On Sites, both use the same HTTPS endpoint at
+`/api/mcp`. The implementation remains available at `/mcp` for compatible
+direct-worker and local hosts.
 
 ### Run and connect the MCP app
 
@@ -66,7 +68,7 @@ There are two useful entry paths. Both use the same HTTPS endpoint at `/mcp`.
 2. Deploy it to an HTTPS URL that ChatGPT can reach. `localhost` is useful for
    development, but a remote ChatGPT client cannot call a loopback address.
 3. In ChatGPT, enable developer mode under **Settings → Security and login**,
-   add the deployed `https://<host>/mcp` endpoint under **Settings → Plugins**,
+   add the deployed `https://<host>/api/mcp` endpoint under **Settings → Plugins**,
    and select the app from **+ → More** in a chat. These names follow the
    current [OpenAI Apps SDK connection guide](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt).
    If a client also exposes an `@Continuity Lab` shortcut, it may be used, but
@@ -165,7 +167,8 @@ router version from prose.
 - `app/api/continuity/sources`: immutable uploaded source versions with a
   server-validated narrative/reference/proposal document type
 - `app/api/continuity/repositories`: commit-pinned GitHub snapshot sync and status
-- `app/mcp`: stateless read-only MCP transport for the immutable reviewed VCS
+- `app/api/mcp` (hosted alias) and `app/mcp` (direct-worker compatibility):
+  stateless read-only MCP transport for the immutable reviewed VCS
   sample, exact-span text packets, and bounded anonymous public-GitHub excerpts;
   it does not expose arbitrary persisted or private workspaces
 - D1: project, source, snapshot, provider-binding, and analysis records
@@ -229,7 +232,8 @@ verified compiler or reviewed adapter record.
   observations; no raw image/OCR adapter and no browser/API route yet.
 - **GitHub:** bounded commit-pinned snapshot sync; no webhook, incremental
   GitHub App flow, or live working-tree mount.
-- **MCP:** an executable stateless `/mcp` transport for five read-only tools:
+- **MCP:** an executable stateless `/api/mcp` hosted transport for five read-only
+  tools, with `/mcp` retained for compatible direct-worker and local hosts:
   three over `vcs-demo-r1`, one exact-span text-packet compiler, and one bounded
   anonymous public-GitHub inspector. Authenticated persisted/private workspaces
   and resource handlers are not implemented.
