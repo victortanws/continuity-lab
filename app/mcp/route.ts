@@ -31,6 +31,7 @@ import {
   type QuestionGraphQueryResult,
 } from "@/lib/continuity/question-graph";
 import { GitHubRepositoryProvider, RepositoryProviderError } from "@/lib/continuity/repositories/github";
+import { ContinuityRepository } from "@/lib/continuity/storage/repository";
 
 export const runtime = "edge";
 
@@ -41,6 +42,8 @@ const MAX_CONTEXT_REFS = 20;
 const PUBLIC_REPOSITORY_DEADLINE_MS = 20_000;
 const PUBLIC_REPOSITORY_MAX_CALLS = 8;
 const PUBLIC_REPOSITORY_MAX_CONCURRENT_PER_ISOLATE = 2;
+const PUBLIC_REPOSITORY_USAGE_WINDOW_SECONDS = 24 * 60 * 60;
+const DEFAULT_PUBLIC_REPOSITORY_DAILY_LIMIT = 50;
 let publicRepositoryCallsInFlight = 0;
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const EXPOSED_TOOL_NAMES = [
@@ -56,6 +59,10 @@ type ReviewedToolName = Extract<ExposedToolName,
 type ContextToolName = Exclude<ExposedToolName, ReviewedToolName>;
 type JsonRpcId = string | number | null;
 type JsonObject = Record<string, unknown>;
+type McpRuntimeEnv = {
+  DB?: D1Database;
+  MCP_PUBLIC_REPOSITORY_DAILY_LIMIT?: string;
+};
 
 const demoEngine = new ContinuityEngine(
   new DemoRetriever(),
@@ -422,6 +429,10 @@ export async function POST(request: Request): Promise<Response> {
     if (isContextTool(name)) {
       const inputError = validateContextToolArguments(name, argumentsValue);
       if (inputError) return rpcResult(id, toolError("invalid_arguments", inputError));
+      if (name === "continuity_inspect_public_repository") {
+        const budgetError = await publicRepositoryBudgetError(request);
+        if (budgetError) return rpcResult(id, budgetError);
+      }
       try {
         const result = name === "continuity_compile_material"
           ? compileMaterialTool(argumentsValue)
@@ -699,6 +710,74 @@ async function inspectRepositoryTool(input: JsonObject) {
     structuredContent,
     isError: false,
   };
+}
+
+export async function reservePublicRepositoryInspection(
+  repository: Pick<ContinuityRepository, "consumeUsage">,
+  dailyLimit = DEFAULT_PUBLIC_REPOSITORY_DAILY_LIMIT,
+) {
+  if (!Number.isSafeInteger(dailyLimit) || dailyLimit < 1 || dailyLimit > 500) {
+    throw new TypeError("The public repository daily limit must be an integer from 1 through 500.");
+  }
+  return repository.consumeUsage(
+    "global:mcp:public-github",
+    "inspect_public_repository",
+    dailyLimit,
+    PUBLIC_REPOSITORY_USAGE_WINDOW_SECONDS,
+  );
+}
+
+async function publicRepositoryBudgetError(request: Request) {
+  if (isLocalOrTestMcpRequest(request)) return null;
+  let bindings: McpRuntimeEnv;
+  try {
+    const { env } = await import("cloudflare:workers");
+    bindings = env as unknown as McpRuntimeEnv;
+  } catch {
+    return toolError(
+      "service_budget_unavailable",
+      "The durable public-repository budget is unavailable, so no GitHub request was started.",
+    );
+  }
+  if (!bindings.DB) {
+    return toolError(
+      "service_budget_unavailable",
+      "The durable public-repository budget is not configured, so no GitHub request was started.",
+    );
+  }
+  try {
+    const decision = await reservePublicRepositoryInspection(
+      new ContinuityRepository(bindings.DB),
+      boundedPublicRepositoryDailyLimit(bindings.MCP_PUBLIC_REPOSITORY_DAILY_LIMIT),
+    );
+    return decision.allowed
+      ? null
+      : toolError(
+          "service_budget_exhausted",
+          `The public-repository inspection budget is exhausted; retry after approximately ${decision.retryAfterSeconds} seconds.`,
+        );
+  } catch {
+    return toolError(
+      "service_budget_unavailable",
+      "The durable public-repository budget could not be reserved, so no GitHub request was started.",
+    );
+  }
+}
+
+function boundedPublicRepositoryDailyLimit(value: string | undefined): number {
+  if (!value?.trim() || !/^\d+$/.test(value.trim())) return DEFAULT_PUBLIC_REPOSITORY_DAILY_LIMIT;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed)
+    ? Math.max(1, Math.min(500, parsed))
+    : DEFAULT_PUBLIC_REPOSITORY_DAILY_LIMIT;
+}
+
+function isLocalOrTestMcpRequest(request: Request): boolean {
+  const hostname = new URL(request.url).hostname.toLowerCase();
+  return hostname === "localhost"
+    || hostname === "127.0.0.1"
+    || hostname === "[::1]"
+    || hostname.endsWith(".example");
 }
 
 function packetEvidence(packet: ReturnType<typeof buildMcpContextPacket>): EvidenceChunk[] {

@@ -137,7 +137,8 @@ credential.
 
 The public-repository tool is intentionally a preview: one immutable commit,
 at most eight provider calls, six files read, 20 KiB of returned excerpts, a
-20-second deadline, no automatic retry, and no corpus-wide absence claim. The
+20-second deadline, no automatic retry, a durable service-global daily
+reservation before any GitHub call, and no corpus-wide absence claim. The
 upload compiler accepts source assertions, not project truth. Its graph is
 question-scoped and can traverse only verified claims and verified upstream
 semantic links; it is not yet a durable whole-corpus knowledge graph or an
@@ -256,6 +257,9 @@ verified compiler or reviewed adapter record.
   value is absent; localhost remains available for development.
 - `REPOSITORY_MAX_FILES` and `REPOSITORY_MAX_TOTAL_BYTES` (optional): conservative
   deployment-specific limits bounded by the connector's hard policy ceiling.
+- `MCP_PUBLIC_REPOSITORY_DAILY_LIMIT` (optional): service-global daily cap for
+  anonymous public-repository MCP inspections, clamped to `1..500` and defaulting
+  to `50`. D1 reservation failure stops before GitHub is contacted.
 - `BINARY_UPLOAD_ALLOWED_EMAILS` (optional): exact ChatGPT account emails
   permitted to use the PDF/DOC/DOCX/PPTX preview. Hosted binary uploads fail
   closed when this is absent because those formats are not yet content-secret-

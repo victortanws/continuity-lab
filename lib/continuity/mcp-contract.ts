@@ -174,7 +174,7 @@ export const continuityMcpTools = {
     },
   },
   continuity_inspect_public_repository: {
-    description: "Use when the user supplies a public GitHub repository and a canon question. Resolve one immutable commit and return a small safe set of question-relevant excerpts. For exact entity or causal verification, pass those excerpts to continuity_compile_material. Private repositories are not accessed.",
+    description: "Use when the user supplies a public GitHub repository and a canon question. After a durable service-global reservation, resolve one immutable commit and return a small safe set of question-relevant excerpts. For exact entity or causal verification, pass those excerpts to continuity_compile_material. Private repositories are not accessed.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

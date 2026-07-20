@@ -115,8 +115,11 @@ to this evidence-routing product rather than copied as application canon.
   identifiers, sends no authorization header, resolves a full commit before
   reading, reapplies safe-path and secret filters, and is capped per request at
   20 seconds, eight provider calls, six files, 384 KiB read, and 20 KiB returned.
-  It has a two-call per-isolate concurrency ceiling and no retry. These are
-  resource controls, not durable identity or distributed rate limiting.
+  It has a two-call per-isolate concurrency ceiling, no retry, and consumes one
+  conditional service-global D1 reservation before GitHub is contacted. The
+  default is 50 inspections per UTC day and the configured value is clamped to
+  `1..500`. This bounds shared outbound abuse but does not provide user identity
+  or fairness; a malicious caller can still exhaust the shared allowance.
 - D1 statements are parameterized. React renders model/source strings as text,
   not raw HTML. Production source maps are disabled; CSP, anti-framing, HSTS,
   MIME, referrer, permissions, and opener headers are configured.
@@ -148,10 +151,10 @@ general security guarantee.
 - Add maintained secret scanning for compressed PDF/Office contents after safe
   extraction; the operator-only preview is not a promise that binary documents
   are credential-safe.
-- Add organization membership/roles, signed authentication for any deployment
-  outside trusted Sites ingress, durable distributed request/egress quotas for
-  the anonymous repository preview, and an OAuth-authenticated private-workspace
-  MCP path with per-project authorization.
+- Add organization membership/roles, signed authentication for mutable routes
+  outside trusted Sites ingress, per-user fairness beyond the anonymous
+  repository preview's service-global D1 ceiling, and an OAuth-authenticated
+  private-workspace MCP path with per-project authorization.
 - Add private MCP resource handlers, consented mutation boundaries, quotas, and
   audit logging. Stateless upload/repository evidence preparation is not a
   private persisted-workspace connector.

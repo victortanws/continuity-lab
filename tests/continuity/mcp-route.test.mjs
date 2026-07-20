@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { POST } from "../../app/mcp/route.ts";
+import { POST, reservePublicRepositoryInspection } from "../../app/mcp/route.ts";
 import { continuityMcpTools } from "../../lib/continuity/mcp-contract.ts";
 import { VCS_DEMO_REVISION } from "../../lib/continuity/demo.ts";
 
-function request(payload, headers = {}) {
-  return new Request("https://continuity.example/mcp", {
+function request(payload, headers = {}, url = "https://continuity.example/mcp") {
+  return new Request(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -142,6 +142,49 @@ test("the public-repository MCP tool uses anonymous bounded GitHub reads and pin
     assert.match(inspected.body.result.structuredContent.excerpts[0].locator, new RegExp(commit));
     assert.ok(calls.length <= 8);
     assert.ok(calls.every((item) => item.authorization === null), "the anonymous public tool must not use a server GitHub credential");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("public repository inspection consumes one durable service-global reservation", async () => {
+  const calls = [];
+  const decision = await reservePublicRepositoryInspection({
+    async consumeUsage(...args) {
+      calls.push(args);
+      return { allowed: true, count: 1, limit: 7, retryAfterSeconds: 86_400 };
+    },
+  }, 7);
+
+  assert.equal(decision.allowed, true);
+  assert.deepEqual(calls, [[
+    "global:mcp:public-github",
+    "inspect_public_repository",
+    7,
+    86_400,
+  ]]);
+  await assert.rejects(
+    reservePublicRepositoryInspection({ consumeUsage: async () => decision }, 0),
+    /integer from 1 through 500/i,
+  );
+});
+
+test("a remote repository inspection fails before GitHub when durable quota storage is unavailable", async () => {
+  const previousFetch = globalThis.fetch;
+  let providerCalled = false;
+  globalThis.fetch = async () => {
+    providerCalled = true;
+    throw new Error("GitHub must not be called without a durable reservation");
+  };
+  try {
+    const response = await POST(request(toolCall("budget", "continuity_inspect_public_repository", {
+      repository: "example/public-story",
+      question: "Who is Grandma?",
+    }), {}, "https://continuity.invalid/mcp"));
+    const body = await response.json();
+    assert.equal(body.result.isError, true);
+    assert.match(body.result.content[0].text, /service_budget_unavailable/);
+    assert.equal(providerCalled, false);
   } finally {
     globalThis.fetch = previousFetch;
   }
