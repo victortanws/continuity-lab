@@ -8,6 +8,10 @@ interface Env {
   SOURCES: R2Bucket;
   OPENAI_API_KEY?: string;
   OPENAI_VECTOR_STORE_ID?: string;
+  GITHUB_TOKEN?: string;
+  REPOSITORY_SYNC_ALLOWED_EMAILS?: string;
+  REPOSITORY_MAX_FILES?: string;
+  REPOSITORY_MAX_TOTAL_BYTES?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {

@@ -13,6 +13,8 @@ export const continuityResources = {
     `continuity://projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(entityId)}`,
   analysis: (projectId: string, analysisId: string) =>
     `continuity://projects/${encodeURIComponent(projectId)}/analyses/${encodeURIComponent(analysisId)}`,
+  repositorySnapshot: (projectId: string, snapshotId: string) =>
+    `continuity://projects/${encodeURIComponent(projectId)}/repository-snapshots/${encodeURIComponent(snapshotId)}`,
 } as const;
 const projectRevisionInput = {
   type: "object",
@@ -25,6 +27,18 @@ const projectRevisionInput = {
 } as const;
 
 export const continuityMcpTools = {
+  continuity_get_repository_snapshot: {
+    description: "Inspect the active commit-pinned repository manifest, coverage, and omitted paths without fetching GitHub again.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["projectId"],
+      properties: {
+        projectId: { type: "string", minLength: 1 },
+        snapshotId: { type: "string", minLength: 1 },
+      },
+    },
+  },
   continuity_search_evidence: {
     description: "Find revision-pinned source fragments without interpreting them as truth.",
     inputSchema: {

@@ -40,6 +40,63 @@ export type ProviderBinding = {
   createdAt: string;
 };
 
+export type RepositorySyncStatus = "idle" | "syncing" | "ready" | "failed";
+export type RepositorySnapshotStatus = "candidate" | "ready" | "failed";
+
+export type StoredRepositoryConnection = {
+  id: string;
+  projectId: string;
+  provider: string;
+  owner: string;
+  repository: string;
+  canonicalUrl: string;
+  requestedRef: string | null;
+  activeSnapshotId: string | null;
+  syncStatus: RepositorySyncStatus;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StoredRepositorySnapshot = {
+  id: string;
+  projectId: string;
+  connectionId: string;
+  commitSha: string;
+  treeSha: string;
+  requestedRef: string;
+  status: RepositorySnapshotStatus;
+  coverageComplete: number;
+  treeTruncated: number;
+  selectedFileCount: number;
+  skippedFileCount: number;
+  totalBytes: number;
+  policyVersion: string;
+  manifestR2Key: string | null;
+  packetR2Key: string | null;
+  packetSourceId: string | null;
+  indexStatus: SourceIndexStatus;
+  indexError: string | null;
+  failureCode: string | null;
+  failureMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type StoredRepositoryEntry = {
+  id: string;
+  snapshotId: string;
+  path: string;
+  blobSha: string;
+  contentSha256: string;
+  byteSize: number;
+  contentType: string;
+  r2Key: string;
+  createdAt: string;
+};
+
+export type CreateRepositoryEntryInput = Omit<StoredRepositoryEntry, "id" | "createdAt">;
+
 type CreateSourceInput = Omit<StoredSource, "indexStatus" | "indexError" | "createdAt"> & {
   indexStatus?: SourceIndexStatus;
 };
@@ -166,6 +223,265 @@ export class ContinuityRepository {
     return revision;
   }
 
+  async ensureRepositoryConnection(input: {
+    projectId: string;
+    provider: string;
+    owner: string;
+    repository: string;
+    canonicalUrl: string;
+    requestedRef: string;
+  }): Promise<StoredRepositoryConnection> {
+    const existing = await this.getRepositoryConnection(
+      input.projectId,
+      input.provider,
+      input.owner,
+      input.repository,
+    );
+    const id = existing?.id ?? `repository_${crypto.randomUUID()}`;
+    await this.db.prepare(
+      `INSERT INTO repository_connections (
+         id, project_id, provider, owner, repository, canonical_url,
+         requested_ref, sync_status, updated_at
+       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'syncing', CURRENT_TIMESTAMP)
+       ON CONFLICT(project_id, provider, owner, repository) DO UPDATE SET
+         canonical_url = excluded.canonical_url,
+         requested_ref = excluded.requested_ref,
+         sync_status = 'syncing',
+         last_error = NULL,
+         updated_at = CURRENT_TIMESTAMP`,
+    ).bind(
+      id,
+      input.projectId,
+      input.provider,
+      input.owner,
+      input.repository,
+      input.canonicalUrl,
+      input.requestedRef,
+    ).run();
+    const connection = await this.getRepositoryConnection(
+      input.projectId,
+      input.provider,
+      input.owner,
+      input.repository,
+    );
+    if (!connection) throw new Error("The repository connection could not be stored.");
+    return connection;
+  }
+
+  async getRepositoryConnection(
+    projectId: string,
+    provider: string,
+    owner: string,
+    repository: string,
+  ): Promise<StoredRepositoryConnection | null> {
+    const result = await this.db.prepare(
+      `SELECT id, project_id AS projectId, provider, owner, repository,
+              canonical_url AS canonicalUrl, requested_ref AS requestedRef,
+              active_snapshot_id AS activeSnapshotId, sync_status AS syncStatus,
+              last_error AS lastError, created_at AS createdAt, updated_at AS updatedAt
+       FROM repository_connections
+       WHERE project_id = ?1 AND provider = ?2 AND owner = ?3 AND repository = ?4
+       LIMIT 1`,
+    ).bind(projectId, provider, owner, repository).all<StoredRepositoryConnection>();
+    return first(result);
+  }
+
+  async listRepositoryConnections(projectId: string, limit = 20): Promise<StoredRepositoryConnection[]> {
+    const safeLimit = Math.max(1, Math.min(limit, 50));
+    const result = await this.db.prepare(
+      `SELECT id, project_id AS projectId, provider, owner, repository,
+              canonical_url AS canonicalUrl, requested_ref AS requestedRef,
+              active_snapshot_id AS activeSnapshotId, sync_status AS syncStatus,
+              last_error AS lastError, created_at AS createdAt, updated_at AS updatedAt
+       FROM repository_connections WHERE project_id = ?1
+       ORDER BY updated_at DESC, id DESC LIMIT ?2`,
+    ).bind(projectId, safeLimit).all<StoredRepositoryConnection>();
+    return result.results ?? [];
+  }
+
+  async findRepositorySnapshot(
+    connectionId: string,
+    commitSha: string,
+    policyVersion: string,
+  ): Promise<StoredRepositorySnapshot | null> {
+    const result = await this.db.prepare(
+      `${repositorySnapshotSelect()}
+       WHERE connection_id = ?1 AND commit_sha = ?2 AND policy_version = ?3 LIMIT 1`,
+    ).bind(connectionId, commitSha, policyVersion).all<StoredRepositorySnapshot>();
+    return first(result);
+  }
+
+  async getRepositorySnapshot(snapshotId: string): Promise<StoredRepositorySnapshot | null> {
+    const result = await this.db.prepare(
+      `${repositorySnapshotSelect()} WHERE id = ?1 LIMIT 1`,
+    ).bind(snapshotId).all<StoredRepositorySnapshot>();
+    return first(result);
+  }
+
+  async getActiveRepositorySnapshot(projectId: string): Promise<StoredRepositorySnapshot | null> {
+    const result = await this.db.prepare(
+      `${repositorySnapshotSelect("s")}
+       JOIN repository_connections c ON c.active_snapshot_id = s.id
+       WHERE c.project_id = ?1 AND s.status = 'ready'
+       ORDER BY c.updated_at DESC LIMIT 1`,
+    ).bind(projectId).all<StoredRepositorySnapshot>();
+    return first(result);
+  }
+
+  async prepareRepositorySnapshot(input: {
+    id?: string;
+    projectId: string;
+    connectionId: string;
+    commitSha: string;
+    treeSha: string;
+    requestedRef: string;
+    policyVersion: string;
+  }): Promise<StoredRepositorySnapshot> {
+    const id = input.id ?? `snapshot_${crypto.randomUUID()}`;
+    await this.db.prepare(
+      `INSERT INTO repository_snapshots (
+         id, project_id, connection_id, commit_sha, tree_sha, requested_ref,
+         status, policy_version, index_status
+       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'candidate', ?7, 'stored')
+       ON CONFLICT(connection_id, commit_sha, policy_version) DO UPDATE SET
+         tree_sha = excluded.tree_sha,
+         requested_ref = excluded.requested_ref,
+         status = 'candidate',
+         failure_code = NULL,
+         failure_message = NULL,
+         completed_at = NULL`,
+    ).bind(
+      id,
+      input.projectId,
+      input.connectionId,
+      input.commitSha,
+      input.treeSha,
+      input.requestedRef,
+      input.policyVersion,
+    ).run();
+    const snapshot = await this.findRepositorySnapshot(
+      input.connectionId,
+      input.commitSha,
+      input.policyVersion,
+    );
+    if (!snapshot) throw new Error("The repository snapshot could not be prepared.");
+    await this.db.prepare(`DELETE FROM repository_entries WHERE snapshot_id = ?1`).bind(snapshot.id).run();
+    return snapshot;
+  }
+
+  async saveRepositoryEntries(entries: CreateRepositoryEntryInput[]): Promise<void> {
+    for (let start = 0; start < entries.length; start += 50) {
+      const statements = entries.slice(start, start + 50).map((entry) => this.db.prepare(
+        `INSERT INTO repository_entries (
+           id, snapshot_id, path, blob_sha, content_sha256, byte_size, content_type, r2_key
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+      ).bind(
+        `repository-entry_${crypto.randomUUID()}`,
+        entry.snapshotId,
+        entry.path,
+        entry.blobSha,
+        entry.contentSha256,
+        entry.byteSize,
+        entry.contentType,
+        entry.r2Key,
+      ));
+      if (statements.length) await this.db.batch(statements);
+    }
+  }
+
+  async promoteRepositorySnapshot(input: {
+    snapshotId: string;
+    connectionId: string;
+    projectId: string;
+    coverageComplete: boolean;
+    treeTruncated: boolean;
+    selectedFileCount: number;
+    skippedFileCount: number;
+    totalBytes: number;
+    manifestR2Key: string;
+    packetR2Key: string;
+    packetSourceId: string;
+    indexStatus: SourceIndexStatus;
+    indexError?: string | null;
+  }): Promise<string> {
+    const revision = `revision_${crypto.randomUUID()}`;
+    await this.db.batch([
+      this.db.prepare(
+        `UPDATE repository_snapshots SET
+           status = 'ready', coverage_complete = ?2, tree_truncated = ?3,
+           selected_file_count = ?4, skipped_file_count = ?5, total_bytes = ?6,
+           manifest_r2_key = ?7, packet_r2_key = ?8, packet_source_id = ?9,
+           index_status = ?10, index_error = ?11, completed_at = CURRENT_TIMESTAMP
+         WHERE id = ?1 AND status = 'candidate'`,
+      ).bind(
+        input.snapshotId,
+        input.coverageComplete ? 1 : 0,
+        input.treeTruncated ? 1 : 0,
+        input.selectedFileCount,
+        input.skippedFileCount,
+        input.totalBytes,
+        input.manifestR2Key,
+        input.packetR2Key,
+        input.packetSourceId,
+        input.indexStatus,
+        input.indexError ?? null,
+      ),
+      this.db.prepare(
+        `UPDATE repository_connections SET
+           active_snapshot_id = ?2, sync_status = 'ready', last_error = NULL,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?1`,
+      ).bind(input.connectionId, input.snapshotId),
+      this.db.prepare(
+        `UPDATE projects SET active_revision = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`,
+      ).bind(input.projectId, revision),
+    ]);
+    return revision;
+  }
+
+  async updateRepositorySnapshotIndexStatus(
+    snapshotId: string,
+    status: SourceIndexStatus,
+    error: string | null = null,
+  ): Promise<void> {
+    await this.db.prepare(
+      `UPDATE repository_snapshots SET index_status = ?2, index_error = ?3 WHERE id = ?1`,
+    ).bind(snapshotId, status, error).run();
+  }
+
+  async activateRepositorySnapshot(connectionId: string, snapshotId: string): Promise<void> {
+    await this.db.prepare(
+      `UPDATE repository_connections SET active_snapshot_id = ?2, sync_status = 'ready',
+         last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`,
+    ).bind(connectionId, snapshotId).run();
+  }
+
+  async failRepositorySnapshot(input: {
+    snapshotId: string;
+    connectionId: string;
+    code: string;
+    message: string;
+  }): Promise<void> {
+    const safeMessage = input.message.slice(0, 1000);
+    await this.db.batch([
+      this.db.prepare(
+        `UPDATE repository_snapshots SET status = 'failed', failure_code = ?2,
+           failure_message = ?3, completed_at = CURRENT_TIMESTAMP WHERE id = ?1`,
+      ).bind(input.snapshotId, input.code, safeMessage),
+      this.db.prepare(
+        `UPDATE repository_connections SET sync_status = 'failed', last_error = ?2,
+           updated_at = CURRENT_TIMESTAMP WHERE id = ?1`,
+      ).bind(input.connectionId, safeMessage),
+    ]);
+  }
+
+  async failRepositoryConnection(connectionId: string, message: string): Promise<void> {
+    await this.db.prepare(
+      `UPDATE repository_connections SET sync_status = 'failed', last_error = ?2,
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?1`,
+    ).bind(connectionId, message.slice(0, 1000)).run();
+  }
+
   async getProviderBinding(
     projectId: string,
     internalId: string,
@@ -230,4 +546,25 @@ export class ContinuityRepository {
     ).run();
     return id;
   }
+}
+
+function repositorySnapshotSelect(alias = ""): string {
+  const prefix = alias ? `${alias}.` : "";
+  const from = alias ? `repository_snapshots ${alias}` : "repository_snapshots";
+  return `SELECT ${prefix}id, ${prefix}project_id AS projectId,
+                 ${prefix}connection_id AS connectionId, ${prefix}commit_sha AS commitSha,
+                 ${prefix}tree_sha AS treeSha, ${prefix}requested_ref AS requestedRef,
+                 ${prefix}status, ${prefix}coverage_complete AS coverageComplete,
+                 ${prefix}tree_truncated AS treeTruncated,
+                 ${prefix}selected_file_count AS selectedFileCount,
+                 ${prefix}skipped_file_count AS skippedFileCount,
+                 ${prefix}total_bytes AS totalBytes, ${prefix}policy_version AS policyVersion,
+                 ${prefix}manifest_r2_key AS manifestR2Key,
+                 ${prefix}packet_r2_key AS packetR2Key,
+                 ${prefix}packet_source_id AS packetSourceId,
+                 ${prefix}index_status AS indexStatus, ${prefix}index_error AS indexError,
+                 ${prefix}failure_code AS failureCode,
+                 ${prefix}failure_message AS failureMessage,
+                 ${prefix}created_at AS createdAt, ${prefix}completed_at AS completedAt
+          FROM ${from}`;
 }

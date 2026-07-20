@@ -85,9 +85,15 @@ export async function POST(request: Request) {
       return Response.json({ error: "Project not found." }, { status: 404 });
     }
 
+    const activeRepositorySnapshot = await repository.getActiveRepositorySnapshot(projectId);
+    const repositoryScope = activeRepositorySnapshot
+      ? ` Repository snapshot ${activeRepositorySnapshot.commitSha} contributes ${activeRepositorySnapshot.selectedFileCount} selected files; complete coverage: ${Boolean(activeRepositorySnapshot.coverageComplete)}.`
+      : "";
     const query: QueryRequest = {
       projectId,
-      projectRevision: projectId === "vcs-demo" ? VCS_DEMO_REVISION : project.activeRevision,
+      projectRevision: projectId === "vcs-demo" && !activeRepositorySnapshot
+        ? VCS_DEMO_REVISION
+        : project.activeRevision,
       timeScope: typeof payload.timeScope === "string" ? payload.timeScope.trim().slice(0, 240) || null : null,
       storyPosition: typeof payload.storyPosition === "number" && Number.isFinite(payload.storyPosition) ? payload.storyPosition : undefined,
       question,
@@ -96,25 +102,36 @@ export async function POST(request: Request) {
       contextRefs: cleanStringArray(payload.contextRefs),
       coverage: projectId === "vcs-demo"
         ? {
-            scope: "The complete current VCS trigger registry plus the demo contract, economy, cast, dialogue, and asset records.",
-            complete: true,
+            scope: `The complete current VCS trigger registry plus the demo contract, economy, cast, dialogue, and asset records.${repositoryScope}`,
+            complete: activeRepositorySnapshot ? Boolean(activeRepositorySnapshot.coverageComplete) : true,
           }
         : {
-            scope: "Indexed source fragments with question-scoped causal extraction; exhaustive runtime coverage is not established.",
+            scope: `Indexed source fragments with question-scoped causal extraction; exhaustive runtime coverage is not established.${repositoryScope}`,
             complete: false,
           },
     };
     const apiKey = bindings.OPENAI_API_KEY?.trim();
     const vectorBinding = await repository.getProviderBinding(projectId, projectId, "vector_store");
     const vectorStoreId = vectorBinding?.externalId || bindings.OPENAI_VECTOR_STORE_ID?.trim();
+    const repositoryVectorStoreId = activeRepositorySnapshot
+      ? (await repository.getProviderBinding(
+          projectId,
+          activeRepositorySnapshot.id,
+          "repository_vector_store",
+        ))?.externalId
+      : undefined;
 
     let engine: ContinuityEngine;
-    if (apiKey && vectorStoreId) {
-      const openAIRetriever = new OpenAIRetriever(apiKey, vectorStoreId);
+    if (apiKey && (vectorStoreId || repositoryVectorStoreId || projectId === "vcs-demo")) {
+      const retrievers = [
+        ...(projectId === "vcs-demo" ? [new DemoRetriever()] : []),
+        ...(vectorStoreId ? [new OpenAIRetriever(apiKey, vectorStoreId)] : []),
+        ...(repositoryVectorStoreId && repositoryVectorStoreId !== vectorStoreId
+          ? [new OpenAIRetriever(apiKey, repositoryVectorStoreId)]
+          : []),
+      ];
       engine = new ContinuityEngine(
-        projectId === "vcs-demo"
-          ? new CompositeRetriever([new DemoRetriever(), openAIRetriever])
-          : openAIRetriever,
+        retrievers.length === 1 ? retrievers[0] : new CompositeRetriever(retrievers),
         new OpenAIReasoner(apiKey),
       );
     } else if (projectId === "vcs-demo") {

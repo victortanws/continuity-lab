@@ -17,6 +17,11 @@ interface D1PreparedStatement {
 
 interface D1Database {
   prepare(query: string): D1PreparedStatement;
+  batch<T = Record<string, unknown>>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
+}
+
+interface R2ObjectBody {
+  arrayBuffer(): Promise<ArrayBuffer>;
 }
 
 interface R2Bucket {
@@ -28,6 +33,7 @@ interface R2Bucket {
       customMetadata?: Record<string, string>;
     },
   ): Promise<unknown>;
+  get(key: string): Promise<R2ObjectBody | null>;
   delete(key: string): Promise<void>;
 }
 

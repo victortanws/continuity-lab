@@ -1,8 +1,13 @@
-# vinext-starter
+# Continuity Lab
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+An evidence-first consequence engine for stories, games, codebases, and long-form
+text. The Build Week demonstration uses Vibe Coder Simulator, while the core
+keeps project records, provider IDs, retrieval, and future MCP transport separate.
+
+The hosted Site can accept file uploads or synchronize a read-only GitHub
+snapshot. Repository sync resolves an exact commit, excludes sensitive and
+unsupported paths, stores immutable originals and a manifest, and optionally
+indexes a path-marked packet for GPT-5.6 Sol. Repository code is never executed.
 
 ## Prerequisites
 
@@ -18,14 +23,30 @@ npm run build
 
 This starter does not use `wrangler.jsonc`.
 
-## Included Shape
+## Runtime shape
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+- `app/api/continuity/query`: evidence retrieval, validation, and GPT-5.6 synthesis
+- `app/api/continuity/sources`: immutable uploaded source versions
+- `app/api/continuity/repositories`: commit-pinned GitHub snapshot sync and status
+- D1: project, source, snapshot, provider-binding, and analysis records
+- R2: uploaded bytes, repository blobs, manifests, and retrieval packets
+- OpenAI vector stores: replaceable retrieval projections, isolated per repository snapshot
+
+## Hosted environment values
+
+- `OPENAI_API_KEY` (secret): enables GPT-5.6 Sol and OpenAI retrieval. Without it,
+  uploads and repository snapshots remain stored but are reported as not searchable.
+- `GITHUB_TOKEN` (secret, optional): read-only Contents access for private repositories
+  and better GitHub API limits. Public repositories work without it.
+- `REPOSITORY_SYNC_ALLOWED_EMAILS`: comma-separated ChatGPT account emails allowed
+  to create repository snapshots. Production synchronization fails closed when this
+  value is absent; localhost remains available for development.
+- `REPOSITORY_MAX_FILES` and `REPOSITORY_MAX_TOTAL_BYTES` (optional): conservative
+  deployment-specific limits bounded by the connector's hard policy ceiling.
+
+The Site's Git commit deploys the application. It is not a live runtime mount of
+GitHub or a developer's local folder. See `docs/ARCHITECTURE.md` for the snapshot,
+webhook, build-time bundle, and remote MCP/orchestrator patterns.
 
 ## Workspace Auth Headers
 

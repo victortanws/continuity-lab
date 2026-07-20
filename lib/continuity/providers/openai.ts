@@ -172,6 +172,10 @@ function mapSearchResult(value: unknown, requestedProjectId: string): EvidenceCh
   const polarity = polarityValue === "positive" || polarityValue === "negative" ? polarityValue : null;
 
   return content.map((text, index) => {
+    const repositoryPath = repositoryPathFromChunk(text);
+    const locator = repositoryPath
+      ? `${baseLocator}/${repositoryPath}`
+      : content.length === 1 ? baseLocator : `${baseLocator} / match ${index + 1}`;
     const textHash = stableHash(`${sourceVersionId}\u0000${baseLocator}\u0000${text}`);
     const id = explicitFragmentId
       ? content.length === 1 ? explicitFragmentId : `${explicitFragmentId}:${textHash}`
@@ -181,8 +185,8 @@ function mapSearchResult(value: unknown, requestedProjectId: string): EvidenceCh
       projectId,
       sourceId,
       sourceVersionId,
-      title,
-      locator: content.length === 1 ? baseLocator : `${baseLocator} / match ${index + 1}`,
+      title: repositoryPath || title,
+      locator,
       text,
       score,
       authority,
@@ -194,6 +198,20 @@ function mapSearchResult(value: unknown, requestedProjectId: string): EvidenceCh
       polarity,
     };
   });
+}
+
+function repositoryPathFromChunk(text: string): string | null {
+  const marker = text.match(/<!--\s*CONTINUITY_FILE\s+path=("(?:[^"\\]|\\.)*")\s+/);
+  if (marker?.[1]) {
+    try {
+      const path = JSON.parse(marker[1]) as unknown;
+      if (typeof path === "string" && path.length <= 512 && !path.includes("..")) return path;
+    } catch {
+      // Fall through to the human-readable file heading.
+    }
+  }
+  const heading = text.match(/^## FILE:\s+([^\n·]+?)(?:\s+·\s+segment\s+\d+\/\d+)?\s*$/m);
+  return heading?.[1]?.trim().slice(0, 512) || null;
 }
 
 function extractOutputText(payload: unknown): string | null {

@@ -75,3 +75,85 @@ export const analyses = sqliteTable("analyses", {
 }, (table) => [
   index("analyses_project_created_idx").on(table.projectId, table.createdAt),
 ]);
+
+/**
+ * Repository records are provider-neutral snapshots. A mutable branch name is
+ * resolved once, while the immutable commit and selected blob identities are
+ * retained for replay. Repository content is never executed by the Site.
+ */
+export const repositoryConnections = sqliteTable("repository_connections", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  owner: text("owner").notNull(),
+  repository: text("repository").notNull(),
+  canonicalUrl: text("canonical_url").notNull(),
+  requestedRef: text("requested_ref"),
+  activeSnapshotId: text("active_snapshot_id"),
+  syncStatus: text("sync_status", {
+    enum: ["idle", "syncing", "ready", "failed"],
+  }).notNull().default("idle"),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("repository_connections_project_repo_unique").on(
+    table.projectId,
+    table.provider,
+    table.owner,
+    table.repository,
+  ),
+  index("repository_connections_project_idx").on(table.projectId, table.updatedAt),
+]);
+
+export const repositorySnapshots = sqliteTable("repository_snapshots", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  connectionId: text("connection_id").notNull().references(() => repositoryConnections.id, { onDelete: "cascade" }),
+  commitSha: text("commit_sha").notNull(),
+  treeSha: text("tree_sha").notNull(),
+  requestedRef: text("requested_ref").notNull(),
+  status: text("status", {
+    enum: ["candidate", "ready", "failed"],
+  }).notNull().default("candidate"),
+  coverageComplete: integer("coverage_complete", { mode: "boolean" }).notNull().default(false),
+  treeTruncated: integer("tree_truncated", { mode: "boolean" }).notNull().default(false),
+  selectedFileCount: integer("selected_file_count").notNull().default(0),
+  skippedFileCount: integer("skipped_file_count").notNull().default(0),
+  totalBytes: integer("total_bytes").notNull().default(0),
+  policyVersion: text("policy_version").notNull(),
+  manifestR2Key: text("manifest_r2_key"),
+  packetR2Key: text("packet_r2_key"),
+  packetSourceId: text("packet_source_id"),
+  indexStatus: text("index_status", {
+    enum: ["stored", "indexing", "indexed", "failed"],
+  }).notNull().default("stored"),
+  indexError: text("index_error"),
+  failureCode: text("failure_code"),
+  failureMessage: text("failure_message"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  completedAt: text("completed_at"),
+}, (table) => [
+  uniqueIndex("repository_snapshots_commit_policy_unique").on(
+    table.connectionId,
+    table.commitSha,
+    table.policyVersion,
+  ),
+  index("repository_snapshots_project_created_idx").on(table.projectId, table.createdAt),
+]);
+
+export const repositoryEntries = sqliteTable("repository_entries", {
+  id: text("id").primaryKey(),
+  snapshotId: text("snapshot_id").notNull().references(() => repositorySnapshots.id, { onDelete: "cascade" }),
+  path: text("path").notNull(),
+  blobSha: text("blob_sha").notNull(),
+  contentSha256: text("content_sha256").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  contentType: text("content_type").notNull(),
+  r2Key: text("r2_key").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("repository_entries_snapshot_path_unique").on(table.snapshotId, table.path),
+  uniqueIndex("repository_entries_r2_key_unique").on(table.r2Key),
+  index("repository_entries_snapshot_idx").on(table.snapshotId, table.path),
+]);

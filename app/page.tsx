@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 
 type ProjectSettings = {
   title: string;
@@ -27,6 +27,15 @@ type UiAnswer = {
   summary: string;
   evidence: string[];
   verdict: ApiVerdict;
+};
+
+type RepositoryState = {
+  phase: "idle" | "syncing" | "ready" | "attention";
+  repository: string;
+  ref: string;
+  commit: string;
+  fileCount?: number;
+  message: string;
 };
 
 const INITIAL_ANSWER: UiAnswer = {
@@ -90,9 +99,39 @@ export default function Home() {
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [answer, setAnswer] = useState<UiAnswer>(INITIAL_ANSWER);
   const [engineMode, setEngineMode] = useState<"ready" | "demonstration" | "gpt-5.6-sol" | "unavailable">("ready");
+  const [repositoryUrl, setRepositoryUrl] = useState("");
+  const [repositoryRef, setRepositoryRef] = useState("");
+  const [repository, setRepository] = useState<RepositoryState>({
+    phase: "idle",
+    repository: "No repository connected",
+    ref: "Default branch",
+    commit: "Not pinned yet",
+    message: "Connect a public GitHub repository to create the first evidence snapshot.",
+  });
 
   const money = useMemo(() => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(settings.goalAmount), [settings.goalAmount]);
   const allSources = [...BASE_SOURCES, ...localSources];
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadRepositoryStatus() {
+      try {
+        const response = await fetch("/api/continuity/repositories?projectId=vcs-demo", { signal: controller.signal });
+        if (!response.ok) return;
+        const payload = await response.json() as Record<string, unknown>;
+        const next = presentRepository(payload);
+        if (next) {
+          setRepository(next);
+          if (next.repository.startsWith("http")) setRepositoryUrl(next.repository);
+          if (next.ref !== "Default branch") setRepositoryRef(next.ref);
+        }
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) return;
+      }
+    }
+    void loadRepositoryStatus();
+    return () => controller.abort();
+  }, []);
 
   async function analyze(nextQuestion?: string) {
     const value = nextQuestion ?? question;
@@ -180,6 +219,46 @@ export default function Home() {
       showToast(error instanceof Error ? error.message : "Upload failed");
     } finally {
       event.target.value = "";
+    }
+  }
+
+  async function syncRepository(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const requestedRepository = repositoryUrl.trim();
+    const requestedRef = repositoryRef.trim();
+    if (!requestedRepository) return;
+    setRepository({
+      phase: "syncing",
+      repository: requestedRepository,
+      ref: requestedRef || "Default branch",
+      commit: "Resolving revision…",
+      message: "Reading permitted files and pinning one exact revision. No repository code is being run.",
+    });
+    try {
+      const response = await fetch("/api/continuity/repositories", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: "vcs-demo", repository: requestedRepository, ref: requestedRef || undefined }),
+      });
+      const payload = await response.json() as Record<string, unknown>;
+      if (!response.ok) throw new Error(readMessage(payload) ?? "The repository could not be synced.");
+      const next = presentRepository(payload) ?? {
+        phase: "ready" as const,
+        repository: requestedRepository,
+        ref: requestedRef || "Default branch",
+        commit: "Pinned by the evidence service",
+        message: "The snapshot is ready. Ask a question above to trace this revision.",
+      };
+      setRepository(next);
+      showToast("Repository snapshot pinned");
+    } catch (error) {
+      setRepository({
+        phase: "attention",
+        repository: requestedRepository,
+        ref: requestedRef || "Default branch",
+        commit: "No new snapshot created",
+        message: error instanceof Error ? error.message : "The repository could not be synced.",
+      });
     }
   }
 
@@ -342,6 +421,51 @@ export default function Home() {
 
       <section className="sources-section">
         <div className="sources-head"><div><div className="eyebrow dark">PROJECT MEMORY</div><h2>Grounded in sources you control.</h2></div><label className="button outline"><Icon name="upload" size={17}/> Add a source<input type="file" accept=".txt,.md,.json,.yaml,.yml,.pdf,.html,.docx,.epub" onChange={(event) => void addSource(event)}/></label></div>
+        <div className="repository-connector" aria-labelledby="repository-title">
+          <div className="repository-main">
+            <div className="repository-copy">
+              <span className="repository-symbol"><Icon name="layers" size={22}/></span>
+              <div className="result-kicker">REPOSITORY MEMORY</div>
+              <h3 id="repository-title">Bring the source of truth with you.</h3>
+              <p>Continuity Lab takes a read-only snapshot of approved files at one exact commit. It understands the folder structure as evidence; it does not execute the repository.</p>
+              <div className="repository-promises" aria-label="Repository safeguards">
+                <span><Icon name="check" size={14}/> Commit-pinned</span>
+                <span><Icon name="check" size={14}/> Read-only</span>
+                <span><Icon name="check" size={14}/> Reproducible answers</span>
+              </div>
+            </div>
+            <form className="repository-form" onSubmit={(event) => void syncRepository(event)}>
+              <div className="repository-fields">
+                <label className="repository-url">
+                  <span>GitHub repository URL</span>
+                  <input type="url" inputMode="url" autoComplete="url" placeholder="https://github.com/your-team/your-story" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} aria-describedby="repository-help" required />
+                </label>
+                <label>
+                  <span>Branch, tag, or commit <i>optional</i></span>
+                  <input placeholder="main" value={repositoryRef} onChange={(event) => setRepositoryRef(event.target.value)} />
+                </label>
+              </div>
+              <button className="button repository-button" type="submit" disabled={repository.phase === "syncing" || !repositoryUrl.trim()}>
+                {repository.phase === "syncing" ? <span className="spinner"/> : <Icon name="arrow" size={17}/>} {repository.phase === "syncing" ? "Creating snapshot…" : repository.phase === "ready" ? "Sync a new revision" : "Create snapshot"}
+              </button>
+              <p id="repository-help">Public repositories can be read directly. Private repositories need a project-level GitHub connection.</p>
+            </form>
+          </div>
+          <div className={`repository-status ${repository.phase}`} role="status" aria-live="polite">
+            <div className="repository-state">
+              <span className="repository-state-dot" />
+              <div><small>SOURCE REVISION</small><strong>{repository.phase === "idle" ? "Ready to connect" : repository.phase === "syncing" ? "Creating a safe snapshot" : repository.phase === "ready" ? "Snapshot ready" : "Needs attention"}</strong></div>
+            </div>
+            <dl>
+              <div><dt>Repository</dt><dd>{shortRepository(repository.repository)}</dd></div>
+              <div><dt>Revision</dt><dd>{repository.ref}</dd></div>
+              <div><dt>Commit</dt><dd>{shortCommit(repository.commit)}</dd></div>
+              {typeof repository.fileCount === "number" && <div><dt>Evidence files</dt><dd>{repository.fileCount.toLocaleString()}</dd></div>}
+            </dl>
+            <p><strong>Suggested next step</strong>{repository.message}</p>
+          </div>
+          <p className="snapshot-note"><Icon name="clock" size={15}/><span>A later push never changes an old answer silently. Sync again when you deliberately want Continuity Lab to adopt a new revision.</span></p>
+        </div>
         <div className="source-grid">{allSources.map((source) => <div className="source-item" key={source.id}><span className={`source-icon ${source.color}`}><Icon name="link" size={18}/></span><div><small>{source.id}</small><strong>{source.name}</strong><p>{source.detail}</p></div><span className="source-check"><Icon name="check" size={14}/></span></div>)}</div>
         <p className="local-note">Uploads are versioned as immutable project evidence. Their status tells you whether they are stored only or also searchable by the reasoning service; a stored file is never presented as indexed.</p>
       </section>
@@ -383,6 +507,72 @@ function WorkPanel({ tab, settings, money }: { tab: string; settings: ProjectSet
   };
   const panel = panels[tab] ?? panels.diagnosis;
   return <div className="work-panel"><div className={`work-number ${panel.accent}`}>{panel.number}</div><div className="work-copy"><h3>{panel.title}</h3><p>{panel.copy}</p></div><div className="task-list">{panel.tasks.map((task) => <div key={task}><Icon name="check" size={15}/><span>{task}</span></div>)}</div></div>;
+}
+
+function presentRepository(payload: Record<string, unknown>): RepositoryState | null {
+  const nested = [payload, asRecord(payload.snapshot), asRecord(payload.connection), asRecord(payload.repository)].filter(Boolean) as Record<string, unknown>[];
+  const collection = Array.isArray(payload.repositories) ? payload.repositories : Array.isArray(payload.connections) ? payload.connections : [];
+  const newest = collection.length ? asRecord(collection[0]) : null;
+  if (newest) nested.push(newest, asRecord(newest.snapshot) ?? {});
+
+  const repository = firstString(nested, ["repositoryUrl", "htmlUrl", "url", "repository", "fullName", "name"]);
+  const commit = firstString(nested, ["commitSha", "commit", "sha", "headSha", "snapshotId"]);
+  if (!repository && !commit) return null;
+
+  const rawStatus = firstString(nested, ["status", "syncStatus", "indexStatus"])?.toLowerCase() ?? "ready";
+  const phase: RepositoryState["phase"] = rawStatus.includes("fail") || rawStatus.includes("error") || rawStatus.includes("attention") ? "attention"
+    : rawStatus === "syncing" || rawStatus.includes("pending") || rawStatus.includes("process") ? "syncing"
+      : "ready";
+  const message = readMessage(payload)
+    ?? (phase === "attention" ? "Review the repository address or access settings, then try again."
+      : phase === "syncing" ? "The evidence service is still preparing this revision."
+        : "Ask a question above. Answers will stay tied to this snapshot until you sync again.");
+
+  return {
+    phase,
+    repository: repository ?? "Connected repository",
+    ref: firstString(nested, ["ref", "requestedRef", "defaultBranch", "branch", "tag"]) ?? "Default branch",
+    commit: commit ?? "Pinned by the evidence service",
+    fileCount: firstNumber(nested, ["fileCount", "indexedFileCount", "sourceCount", "entries"]),
+    message,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function firstString(records: Record<string, unknown>[], keys: string[]) {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) return value;
+    }
+  }
+  return undefined;
+}
+
+function firstNumber(records: Record<string, unknown>[], keys: string[]) {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (Array.isArray(value)) return value.length;
+    }
+  }
+  return undefined;
+}
+
+function readMessage(payload: Record<string, unknown>) {
+  return firstString([payload, asRecord(payload.error) ?? {}, asRecord(payload.snapshot) ?? {}], ["message", "detail", "suggestedAction", "error"]);
+}
+
+function shortRepository(value: string) {
+  return value.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").replace(/\/$/, "");
+}
+
+function shortCommit(value: string) {
+  return /^[a-f\d]{12,}$/i.test(value) ? value.slice(0, 8) : value;
 }
 
 function presentAnswer(raw: Record<string, unknown>): UiAnswer {

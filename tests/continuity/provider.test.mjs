@@ -161,6 +161,36 @@ test("OpenAI retrieval sends a project filter and fails closed on returned metad
   assert.equal(JSON.stringify(result).includes("project B"), false);
 });
 
+test("repository packet retrieval recovers the stable file path from repeated chunk markers", async () => {
+  const retriever = new OpenAIRetriever({
+    apiKey: "test-key",
+    vectorStoreId: "vs-repository-snapshot",
+    fetch: async () => Response.json({
+      data: [{
+        score: 0.88,
+        filename: "vcs-aabbccdd-snapshot.md",
+        attributes: {
+          project_id: "project-a",
+          source_id: "SRC-REPOSITORY",
+          source_version_id: "SRC-REPOSITORY@aabbccdd",
+          locator: `github:${"a".repeat(40)}`,
+          authority: "reference",
+        },
+        content: [{
+          type: "text",
+          text: `<!-- CONTINUITY_FILE path="docs/PROTOTYPE-CONTRACT.md" blob=${"b".repeat(40)} segment=2/4 -->\n## FILE: docs/PROTOTYPE-CONTRACT.md · segment 2/4\nGrandma's operation is a proposed obligation.`,
+        }],
+      }],
+    }),
+  });
+
+  const result = await retriever.retrieve({ projectId: "project-a", question: "What is Grandma owed?" });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].title, "docs/PROTOTYPE-CONTRACT.md");
+  assert.equal(result[0].locator, `github:${"a".repeat(40)}/docs/PROTOTYPE-CONTRACT.md`);
+});
+
 test("OpenAI reasoning pins GPT-5.6 Sol, strict schema, stateless storage, and evidence boundaries", async () => {
   let call;
   const fakeFetch = async (url, init) => {

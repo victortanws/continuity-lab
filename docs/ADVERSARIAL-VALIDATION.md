@@ -20,6 +20,12 @@ This document is the release gate for Continuity Lab. The engine must prefer a b
 | Customer message uses CAST-27 art while referring to USER_0047’s grandmother | Report a text-to-asset identity conflict | Yes |
 | OpenAI search returns provider IDs without internal provenance metadata | Fail closed; do not create a citation from the provider ID | Yes |
 | GPT output is malformed or outside the schema | Return a typed provider error; display no synthetic success | Yes |
+| Repository URL names a non-GitHub host, lookalike subdomain, port, userinfo, query, fragment, or encoded path trick | Reject before any network request | Yes |
+| Repository contains `.env`, a private key, credential file, dependency tree, build output, or binary blob | Exclude it even when a repository manifest requests it | Yes |
+| Repository exceeds tree, file, per-file, or aggregate byte limits | Stop within the configured bound and report partial or failed coverage | Yes |
+| A branch advances while a sync is running | Keep the snapshot pinned to the commit resolved at the start | Yes |
+| GitHub returns a redirect to another host | Reject it; never follow a user-influenced cross-host redirect | Yes |
+| Snapshot persistence or indexing fails halfway through | Preserve the prior active revision; do not expose the candidate as complete | Yes |
 
 ## Required pre-publication cases
 
@@ -63,6 +69,19 @@ These require larger fixtures or integration infrastructure and are recorded now
 - Repeat a strict query across model versions: status and evidence set remain stable within tolerance, though prose can change.
 - Timeout, refusal, or rate limit: typed error and bounded retry; no fabricated fallback.
 - Stale conversation ID: reconstruct the answer from revision, question, prompt version, and evidence refs.
+
+### Repository synchronization
+
+- Parse both `owner/repository` and the canonical HTTPS GitHub form into the same provider-neutral reference.
+- Reject alternate schemes, raw/API URLs supplied by users, Unicode or DNS lookalikes, userinfo, ports, extra path components, traversal, encoded separators, query strings, and fragments before calling `fetch`.
+- Resolve a branch or tag to one full commit SHA, list the tree for that SHA, and retrieve only blobs from that tree. Never repeat branch resolution per file.
+- Record the resolved commit, tree truncation state, selected and omitted file counts, aggregate byte count, and policy version in the snapshot manifest.
+- Skip sensitive basenames and suffixes, secret directories, `.git`, dependency caches, generated output, unsupported binaries, symlinks, submodules, and files above the per-file cap.
+- Stop selection at both the file-count and aggregate-byte limits. A hostile tree of many zero-byte files must still be bounded by the tree-entry cap and recorded as empty; a small number of large files must hit the byte cap.
+- Treat provider `401`, `403`, `404`, `409`, `422`, `429`, timeout, malformed JSON, truncated tree, missing blob, hash/size mismatch, and storage failure as typed incomplete/failure states. Never translate them into an empty-but-complete corpus.
+- Create candidate snapshot records before storage and promote one atomically only after all required blobs and metadata are durable. A retry for the same project, repository, and commit is idempotent.
+- Confirm that query handling touches only the active snapshot and still succeeds when GitHub is unavailable after a completed sync.
+- Confirm that no GitHub token, OpenAI key, authorization header, provider error body containing credentials, or private source excerpt appears in client responses or persisted provider metadata.
 
 ## Metrics
 
