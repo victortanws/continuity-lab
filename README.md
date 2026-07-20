@@ -87,32 +87,55 @@ direct-worker and local hosts.
    - “If I add this scene, what established facts, later payoffs, or production
      assets could it affect?”
 
-The MCP advertises five read-only tools:
+### General engine, current demonstration adapters
+
+Continuity Lab is not limited to VCS, stories, or GitHub repositories. Its core
+operations are domain-neutral: ingest bounded evidence, preserve source and
+authority, resolve entity candidates without forcing a merge, identify exact
+claims and disagreements, map directly stated dependencies, answer questions,
+trace consequences, and evaluate hypothetical changes without promoting them
+to truth. The same protocol can operate over game design documents, software
+requirements and runtime records, production workflows, policy or contractual
+materials, research notes, historical archives, and other evidence-bearing
+corpora. In plain English: it helps people distinguish what their materials
+actually establish, what remains uncertain, what depends on what, and what a
+proposed change could disturb.
+
+The hosted Build Week demonstration currently exposes those capabilities
+through five read-only MCP tools. These are present adapters, not the limits of
+the product:
 
 - `continuity_answer_question`, `continuity_trace_dependencies`, and
-  `continuity_analyze_change` operate on the immutable reviewed VCS sample.
-  A natural ChatGPT tool call needs only the question, target, or proposed
-  change; this hosted adapter supplies its fixed sample ID and revision. Older
-  clients may still send those two scope fields explicitly.
+  `continuity_analyze_change` are the question, dependency, and counterfactual
+  surfaces. In this hosted demonstration they are deliberately bound to the
+  immutable reviewed VCS sample, whose trusted transition registry allows a
+  stronger reachability result. Another reviewed domain adapter could expose
+  the same operations over its own sources, authority policy, and transition
+  registry. A natural VCS tool call needs only the question, target, or
+  proposed change; the adapter supplies its fixed sample ID and revision.
+  Older clients may still send those two scope fields explicitly.
 - `continuity_compile_material` verifies exact claims and entity mentions from
-  text ChatGPT passes from an attachment, paste, or repository-aware host. Its
-  claim frame is deliberately literal: subject, predicate, and any non-empty
-  object are copied exactly from the cited quote in order. An intransitive
-  statement such as “Test T9 passed” uses `frameArity: intransitive`, an empty
-  object, and one copied predicate token at the end of the quoted clause.
-  Expressed objects cannot be discarded. The source's packet-relative
-  `reference`, `proposal`, or `production_record` label remains visible in the
-  receipt and graph; it never becomes project canon. An explicit entity ID is
-  accepted only when that exact ID is visible in the quote. Optional
-  `relations` connect original
-  claim indices only when one accepted positive causal, normative, or
-  historical claim contains the exact cue and both endpoint spans. These edges
-  are source assertions for navigation, not automatic proof that an event is
-  reachable.
-- `continuity_inspect_public_repository` pins a public GitHub repository to one
-  commit and returns a small safe set of question-relevant excerpts. ChatGPT
-  can then pass those excerpts into `continuity_compile_material` for exact
-  entity, conflict, or causal inspection.
+  arbitrary text ChatGPT passes from an attachment, paste, connector, or
+  repository-aware host. This is the current general-purpose evidence boundary,
+  not a story-specific function. Its claim frame is deliberately literal:
+  subject, predicate, and any non-empty object are copied exactly from the cited
+  quote in order. An intransitive statement such as “Test T9 passed” uses
+  `frameArity: intransitive`, an empty object, and one copied predicate token at
+  the end of the quoted clause. Expressed objects cannot be discarded. The
+  source's packet-relative `reference`, `proposal`, or `production_record`
+  label remains visible in the receipt and graph; it never becomes project
+  canon. An explicit entity ID is accepted only when that exact ID is visible
+  in the quote. Optional `relations` connect original claim indices only when
+  one accepted positive causal, normative, or historical claim contains the
+  exact cue and both endpoint spans. These edges are source assertions for
+  navigation, not automatic proof that an event is reachable.
+- `continuity_inspect_public_repository` is one current acquisition connector.
+  It pins a public GitHub repository to one commit and returns a small safe set
+  of question-relevant excerpts. ChatGPT can then pass those excerpts into
+  `continuity_compile_material` for exact entity, conflict, or causal
+  inspection. Future authenticated repositories, document parsers, databases,
+  ledgers, and media-description adapters can feed the same compiler boundary
+  without changing the underlying truth model.
 
 ### Ask about uploaded files or a repository
 

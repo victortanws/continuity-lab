@@ -12,12 +12,16 @@ test("README and MVP keep the keyless MCP entry point and compatibility boundary
   assert.match(readme, /https:\/\/<host>\/api\/mcp/);
   assert.match(readme, /continuity_compile_material/);
   assert.match(readme, /continuity_inspect_public_repository/);
+  assert.match(readme, /present adapters, not the limits of\s+the product/i);
+  assert.match(readme, /game design documents, software\s+requirements/i);
   assert.match(readme, /does not require\s+you or the user to put an OpenAI API\s+key/i);
   assert.match(readme, /The public transport remains MCP `2025-06-18`/);
   assert.match(readme, /`continuity\.mcp\.v1`/);
   assert.match(readme, /cannot.*automatically inherit.*attachment.*Git checkout/is);
 
   assert.match(page, /five read-only tools/);
+  assert.match(page, /domain-neutral evidence, identity, authority, and causality engine/);
+  assert.match(page, /VCS is the current reviewed demonstration adapter/);
   assert.match(page, /continuity_compile_material/);
   assert.match(page, /continuity_inspect_public_repository/);
   assert.match(page, /makes no OpenAI API call/);
