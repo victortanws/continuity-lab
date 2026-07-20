@@ -14,29 +14,45 @@ import {
   type TrustedReachability,
 } from "./contracts";
 import { revisionMembershipDigest } from "./completeness-boundary";
+import { VCS_DEMO_FOLLOW_UPS } from "./demo-questions";
+import { inferContinuityQuestionIntent, normalizedQuestionText } from "./question-intent";
 import { evaluateTransitionGraph, type TransitionGraph } from "./reachability";
 
 export const VCS_DEMO_PROJECT_ID = "vcs-demo";
-export const VCS_DEMO_REVISION = "vcs-demo-r1";
+export const VCS_DEMO_REVISION = "vcs-demo-r2";
 const VCS_DEMO_SOURCE_VERSION_IDS = [
   "SRC-VCS-CAST-v1",
-  "SRC-VCS-CONTRACT-v4",
+  "SRC-VCS-CONTRACT-v5",
   "SRC-VCS-DIALOGUE-v2",
-  "SRC-VCS-ECONOMY-v5",
-  "SRC-VCS-ENDING-v2",
+  "SRC-VCS-ECONOMY-v6",
+  "SRC-VCS-ENDING-v3",
+  "SRC-VCS-FUTURE-STORY-v1",
   "SRC-VCS-ASSETS-v2",
   "SRC-VCS-STORY-v3",
-  "SRC-VCS-TESTS-v3",
-  "SRC-VCS-TRIGGERS-v7",
+  "SRC-VCS-TESTS-v4",
+  "SRC-VCS-TRIGGERS-v8",
   "SRC-VCS-UI-BINDINGS-v3",
   "SRC-VCS-UI-CONTRACT-v1",
 ].sort();
 const VCS_TRIGGER_COMPLETENESS_BOUNDARY = {
   version: "continuity.completeness-boundary.v1" as const,
-  boundaryId: "BOUNDARY-VCS-TRIGGER-PRODUCERS-R1",
+  boundaryId: "BOUNDARY-VCS-TRIGGER-PRODUCERS-R2",
   scope: {
     kind: "exact_claim_keys" as const,
     claimKeys: ["producer:grandma-surgery-funded"],
+  },
+  revision: {
+    projectRevision: VCS_DEMO_REVISION,
+    sourceVersionIds: VCS_DEMO_SOURCE_VERSION_IDS,
+    membershipDigest: revisionMembershipDigest(VCS_DEMO_REVISION, VCS_DEMO_SOURCE_VERSION_IDS),
+  },
+};
+const VCS_PERSONAL_FUNDS_COMPLETENESS_BOUNDARY = {
+  version: "continuity.completeness-boundary.v1" as const,
+  boundaryId: "BOUNDARY-VCS-PERSONAL-FUNDS-R2",
+  scope: {
+    kind: "exact_claim_keys" as const,
+    claimKeys: ["producer:founder-personal-funds-47000"],
   },
   revision: {
     projectRevision: VCS_DEMO_REVISION,
@@ -54,8 +70,17 @@ export const VCS_DEMO_COMPLETENESS_REGISTRY: TrustedCompletenessRegistry = {
     evidenceBinding: {
       evidenceId: "EV-VCS-TRIGGER-REGISTRY",
       sourceId: "SRC-VCS-TRIGGERS",
-      sourceVersionId: "SRC-VCS-TRIGGERS-v7",
+      sourceVersionId: "SRC-VCS-TRIGGERS-v8",
       claimKey: "producer:grandma-surgery-funded",
+      polarity: "negative",
+    },
+  }, {
+    boundary: VCS_PERSONAL_FUNDS_COMPLETENESS_BOUNDARY,
+    evidenceBinding: {
+      evidenceId: "EV-VCS-ECONOMY",
+      sourceId: "SRC-VCS-ECONOMY",
+      sourceVersionId: "SRC-VCS-ECONOMY-v6",
+      claimKey: "producer:founder-personal-funds-47000",
       polarity: "negative",
     },
   }],
@@ -138,10 +163,10 @@ export const VCS_DEMO_EVIDENCE: EvidenceChunk[] = [
     id: "EV-VCS-NARRATIVE-CONTRACT",
     projectId: VCS_DEMO_PROJECT_ID,
     sourceId: "SRC-VCS-CONTRACT",
-    sourceVersionId: "SRC-VCS-CONTRACT-v4",
+    sourceVersionId: "SRC-VCS-CONTRACT-v5",
     title: "Narrative contract",
-    locator: "Obligation G-04",
-    text: "The story must allow the Founder protagonist to earn and pay $47,000 for CAST-27's operation. The payment is a promised payoff, not merely optional flavor text. USER_0047 is a customer and is not the actor responsible for this operation goal.",
+    locator: "Story canon / Grandma operation obligation",
+    text: "The full story must eventually allow the Founder protagonist to earn and personally pay $47,000 for CAST-27's operation. The current playable prototype covers Days 7 and 8 only, so the operation is a later-story payoff and is not expected to be reachable inside that two-day slice. USER_0047 is a customer and is not the actor responsible for this goal.",
     score: 0.99,
     authority: "canon",
     role: "intent",
@@ -154,26 +179,28 @@ export const VCS_DEMO_EVIDENCE: EvidenceChunk[] = [
     id: "EV-VCS-ECONOMY",
     projectId: VCS_DEMO_PROJECT_ID,
     sourceId: "SRC-VCS-ECONOMY",
-    sourceVersionId: "SRC-VCS-ECONOMY-v5",
-    title: "Economy table",
-    locator: "Milestones / founder cash",
-    text: "The current balance uses operation_cost = 47000, a Day 24 target window, and an investment decision at $28,000. Accepting the investment diverts $12,000 before the operation target. The table can raise available cash, but it does not itself emit a story-completion flag.",
+    sourceVersionId: "SRC-VCS-ECONOMY-v6",
+    title: "Current prototype contract",
+    locator: "Days 7–8 / opening economy",
+    text: "The current playable prototype starts the Founder with $700 and ends after Day 8. The jobs, revenue, and costs available in that slice cannot raise the Founder's personal cash to $47,000. Company financing is a different account from the Founder's personal money and cannot be spent directly on Grandma's hospital bill.",
     score: 0.91,
     authority: "production",
     role: "configuration",
     lifecycle: "active",
     claimKinds: ["configured", "causal"],
-    claimKey: "economy-operation-threshold",
-    polarity: "positive",
+    completenessBoundary: VCS_PERSONAL_FUNDS_COMPLETENESS_BOUNDARY,
+    closedWorld: true,
+    claimKey: "producer:founder-personal-funds-47000",
+    polarity: "negative",
   },
   {
     id: "EV-VCS-TRIGGER-REGISTRY",
     projectId: VCS_DEMO_PROJECT_ID,
     sourceId: "SRC-VCS-TRIGGERS",
-    sourceVersionId: "SRC-VCS-TRIGGERS-v7",
+    sourceVersionId: "SRC-VCS-TRIGGERS-v8",
     title: "Story trigger registry",
     locator: "Complete current registry / operation payoff",
-    text: "The complete current trigger registry contains no producer for grandma-surgery-funded. It can advance days and generate plausible events, but no registered transition converts available cash into the operation payment or emits that completion flag.",
+    text: "The complete current trigger registry contains no producer for grandma-surgery-funded. It can advance Days 7 and 8 and generate their configured events, but it contains no later progression that earns $47,000 in personal funds, no one-time hospital payment action, and no registered transition that persists the operation-funded result.",
     score: 0.98,
     authority: "production",
     role: "configuration",
@@ -188,10 +215,10 @@ export const VCS_DEMO_EVIDENCE: EvidenceChunk[] = [
     id: "EV-VCS-ENDING-CONTRACT",
     projectId: VCS_DEMO_PROJECT_ID,
     sourceId: "SRC-VCS-ENDING",
-    sourceVersionId: "SRC-VCS-ENDING-v2",
+    sourceVersionId: "SRC-VCS-ENDING-v3",
     title: "Ending contract",
     locator: "Grandma payoff gate",
-    text: "The post-operation reading scene requires grandma-surgery-funded exactly once. Pre-operation dialogue must retire after that state is persisted.",
+    text: "The planned post-operation reading scene requires one persisted grandma-surgery-funded result. The hospital payment must be charged once, later loads must preserve that result without charging again, and pre-operation dialogue must retire after funding succeeds.",
     score: 0.92,
     authority: "canon",
     role: "intent",
@@ -204,16 +231,32 @@ export const VCS_DEMO_EVIDENCE: EvidenceChunk[] = [
     id: "EV-VCS-TRIGGER-TEST",
     projectId: VCS_DEMO_PROJECT_ID,
     sourceId: "SRC-VCS-TESTS",
-    sourceVersionId: "SRC-VCS-TESTS-v3",
-    title: "Trigger regression tests",
-    locator: "operation-payoff.spec / threshold cases",
-    text: "Existing payoff fixtures and threshold assertions use $47,000. They do not contain a $60,000 case, and they assume the Day 24 balance window remains unchanged.",
+    sourceVersionId: "SRC-VCS-TESTS-v4",
+    title: "Operation acceptance-test contract",
+    locator: "Future operation sequence / required regression cases",
+    text: "The operation sequence needs tests for insufficient personal funds, successful payment at $47,000 or more, a $47,000 personal-balance deduction, one persisted grandma-surgery-funded result, recovery-scene unlock, pre-operation-dialogue retirement, and replay or reload without a second charge. The current prototype has no end-to-end test for that unimplemented later-story sequence.",
     score: 0.86,
     authority: "production",
     role: "test",
     lifecycle: "active",
     claimKinds: ["tested", "causal"],
     claimKey: "tested-operation-threshold",
+    polarity: "positive",
+  },
+  {
+    id: "EV-VCS-SEED-ROUND",
+    projectId: VCS_DEMO_PROJECT_ID,
+    sourceId: "SRC-VCS-FUTURE-STORY",
+    sourceVersionId: "SRC-VCS-FUTURE-STORY-v1",
+    title: "Future-story financing plan",
+    locator: "Marc's Seed Round / The Payment",
+    text: "Marc's planned Seed Round gives the company investment capital; it does not give the Founder personal cash for Grandma's operation. Before the Founder can pay the hospital, a later approved event must create legitimate personal liquidity, such as salary, a disclosed secondary share sale, or a dividend. The Seed Round itself also needs its own story prerequisites before its offer appears.",
+    score: 0.95,
+    authority: "canon",
+    role: "intent",
+    lifecycle: "active",
+    claimKinds: ["normative", "causal"],
+    claimKey: "constraint:seed-round-company-vs-personal-funds",
     polarity: "positive",
   },
   {
@@ -287,7 +330,7 @@ export class DemoRetriever implements EvidenceRetriever {
  */
 export function demoTargetClaimKeys(question: string, proposedChange?: string | null): string[] {
   return classifyQuestion(`${question} ${proposedChange ?? ""}`) === "reachability"
-    ? ["producer:grandma-surgery-funded"]
+    ? ["producer:founder-personal-funds-47000", "producer:grandma-surgery-funded"]
     : [];
 }
 
@@ -299,6 +342,12 @@ export class DemoReachabilityEvaluator implements ReachabilityEvaluator {
   ): Promise<TrustedReachability | null> {
     if (request.projectId !== VCS_DEMO_PROJECT_ID
       || !request.targetClaimKeys?.includes("producer:grandma-surgery-funded")) return null;
+    const targetClaimKeys = [
+      ...(request.targetClaimKeys.includes("producer:founder-personal-funds-47000")
+        ? ["producer:founder-personal-funds-47000"]
+        : []),
+      "producer:grandma-surgery-funded",
+    ];
 
     const graph: TransitionGraph = {
       version: "continuity.transition-graph.v1",
@@ -310,7 +359,7 @@ export class DemoReachabilityEvaluator implements ReachabilityEvaluator {
         position: { axis: request.temporalAxis ?? "day", order: request.storyPosition ?? 8 },
         trueAtoms: [],
         falseAtoms: ["grandma-surgery-funded"],
-        balances: [{ accountKey: "FOUNDER", resourceKey: "cash", unit: "usd-cent", amountMinor: "4700000" }],
+        balances: [{ accountKey: "FOUNDER", resourceKey: "cash", unit: "usd-cent", amountMinor: "70000" }],
         permissions: [],
         knowledge: [],
         eventHistory: [],
@@ -322,8 +371,8 @@ export class DemoReachabilityEvaluator implements ReachabilityEvaluator {
       rules: [],
       coverage: {
         completeTargetKeys: ["fact:grandma-surgery-funded=true"],
-        completeInitialDimensions: ["facts"],
-        evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"],
+        completeInitialDimensions: ["facts", "resources"],
+        evidenceIds: ["EV-VCS-ECONOMY", "EV-VCS-TRIGGER-REGISTRY"],
         excludedSources: [],
         parseFailures: [],
       },
@@ -331,7 +380,7 @@ export class DemoReachabilityEvaluator implements ReachabilityEvaluator {
     const proof = evaluateTransitionGraph(
       graph,
       { kind: "fact", atomKey: "grandma-surgery-funded", value: true },
-      request.targetPosition ?? 24,
+      request.targetPosition ?? 8,
     );
     return {
       source: "server_transition_graph",
@@ -339,33 +388,51 @@ export class DemoReachabilityEvaluator implements ReachabilityEvaluator {
       graphRevision: proof.graphRevision,
       plane: proof.plane,
       completenessScope: route.coverage.scope,
-      targetClaimKeys: ["producer:grandma-surgery-funded"],
-      blockers: proof.blockers.map((blocker) => blocker.explanation),
+      targetClaimKeys,
+      blockers: [
+        "The Days 7–8 prototype starts with $700 and contains no available income path to $47,000 in personal funds.",
+        ...proof.blockers.map((blocker) => blocker.explanation),
+      ],
       assumptions: proof.assumptions,
       path: proof.rulePath.map((step) => `${step.ruleId} @ ${graph.temporalAxis} ${step.at}`),
       evidenceIds: [...new Set([
+        "EV-VCS-ECONOMY",
         "EV-VCS-TRIGGER-REGISTRY",
         ...proof.rulePath.flatMap((step) => step.evidenceIds),
         ...proof.blockers.flatMap((blocker) => blocker.evidenceIds),
       ])],
-      obligations: [{
-        id: "OBL-VCS-PAYMENT-PRODUCER",
-        kind: "producer",
-        from: "sufficient available cash",
-        to: "operation payment resolver",
-        claimKey: "producer:grandma-surgery-funded",
-        claimKind: "configured",
-        relation: "causes",
-        required: true,
-        status: "blocked",
-        evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"],
-      }],
+      obligations: [
+        ...(targetClaimKeys.includes("producer:founder-personal-funds-47000") ? [{
+          id: "OBL-VCS-PERSONAL-FUNDS",
+          kind: "resource" as const,
+          from: "current Days 7–8 economy",
+          to: "$47,000 in Founder personal funds",
+          claimKey: "producer:founder-personal-funds-47000",
+          claimKind: "configured" as const,
+          relation: "causes" as const,
+          required: true as const,
+          status: "blocked" as const,
+          evidenceIds: ["EV-VCS-ECONOMY"],
+        }] : []),
+        {
+          id: "OBL-VCS-PAYMENT-PRODUCER",
+          kind: "producer",
+          from: "sufficient personal funds",
+          to: "operation payment resolver",
+          claimKey: "producer:grandma-surgery-funded",
+          claimKind: "configured",
+          relation: "causes",
+          required: true,
+          status: "blocked",
+          evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"],
+        },
+      ],
       diagnostics: proof.diagnostics,
       search: proof.search,
       certificate: {
         kind: "exhaustive_graph",
-        summary: `The server exhaustively searched the complete configured producer registry through ${graph.temporalAxis} ${request.targetPosition ?? 24}.`,
-        evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"],
+        summary: "The server checked the complete Days 7–8 economy and the complete configured producer registry for this prototype.",
+        evidenceIds: ["EV-VCS-ECONOMY", "EV-VCS-TRIGGER-REGISTRY"],
       },
     };
   }
@@ -381,6 +448,10 @@ export class DemoReasoner implements ContinuityReasoner {
     const answer = kind === "visual-binding" ? visualBindingAnswer(request, byId)
       : kind === "identity" ? identityAnswer(request, byId)
       : kind === "relation" ? relationshipAnswer(request, byId)
+      : kind === "repair" ? repairAnswer(request, byId)
+      : kind === "verification" ? verificationAnswer(request, byId)
+      : kind === "investment" ? investmentAnswer(request, byId)
+      : kind === "source" ? sourceAnswer(request, byId)
       : kind === "reachability" ? reachabilityAnswer(request, byId)
       : kind === "blast-radius" ? blastRadiusAnswer(request, byId)
       : insufficientAnswer(request);
@@ -388,31 +459,35 @@ export class DemoReasoner implements ContinuityReasoner {
   }
 }
 
-type DemoQuestionKind = "identity" | "relation" | "visual-binding" | "reachability" | "blast-radius" | "general";
+type DemoQuestionKind =
+  | "identity"
+  | "relation"
+  | "visual-binding"
+  | "reachability"
+  | "blast-radius"
+  | "repair"
+  | "verification"
+  | "investment"
+  | "source"
+  | "general";
 
 function classifyQuestion(value: string): DemoQuestionKind {
-  const question = value.toLowerCase();
-  if (/\b60[,.]?000\b|what breaks|blast radius|change (?:the )?(?:price|cost)|raise (?:the )?(?:price|cost)|increase (?:the )?(?:price|cost)/.test(question)) {
-    return "blast-radius";
+  const question = normalizedQuestionText(value);
+  if (/\b(?:seed round|marc|company (?:cash|money|capital)|personal liquidity|investment offer|investment route)\b/.test(question)) {
+    return "investment";
   }
-  const asksAboutMessageVisual = /(?:picture|portrait|shown|beside|visual|image)/.test(question)
-    && /message/.test(question)
-    && /(?:customer|user_0047)/.test(question);
-  if (asksAboutMessageVisual) {
-    return "visual-binding";
-  }
-  if (/same (?:person|grandma|grandmother)|(?:grandma|grandmother).*same|merge.*grandm/.test(question)) {
+  if (/\b(?:tell me about grandma|how many grandmothers|multiple grandmothers|multiple grandmas|which grandma|same grandma|same grandmother)\b/.test(question)) {
     return "identity";
   }
-  if (/which grandma|how is .*grandma.*related|relationship|user_0047|whose grandmother|screenshot/.test(question)) {
-    return "relation";
-  }
-  if (/who is grandma|tell me about grandma|how many grandmothers?|multiple grandmothers?|grandma mean/.test(question)) {
-    return "identity";
-  }
-  if (/fund|afford|earn|accumulate|save|pay|operation|surgery|reachable|reachability|completion path|trigger|unlock|achieve|complete/.test(question)) {
-    return "reachability";
-  }
+  const intent = inferContinuityQuestionIntent(value);
+  if (intent === "verification_plan") return "verification";
+  if (intent === "repair_plan") return "repair";
+  if (intent === "change_analysis") return "blast-radius";
+  if (intent === "visual_binding") return "visual-binding";
+  if (intent === "identity") return "identity";
+  if (intent === "relationship") return "relation";
+  if (intent === "source_authority") return "source";
+  if (intent === "reachability") return "reachability";
   return "general";
 }
 
@@ -461,7 +536,7 @@ function visualBindingAnswer(request: QueryRequest, byId: Map<string, EvidenceCh
       requiredChanges: ["Replace the customer-message portrait binding.", "Retain stable IDs for CAST-27 and the unnamed customer grandmother.", "Add a UI assertion that message text and portrait roles cannot silently merge entities."],
       downstreamRisks: ["Other customer messages may reuse the same incorrect binding.", "A purely visual regression test may miss semantic identity drift."],
     },
-    followUpQuestions: ["Which other message cards reuse ART-27?", "Should portrait roles be validated against speaker, subject, or player viewpoint?"],
+    followUpQuestions: [...VCS_DEMO_FOLLOW_UPS.visualBinding],
     caveats: ["The Founder replacement is a proposed presentation fix; it does not change either grandmother's canonical identity."],
   });
 }
@@ -494,7 +569,7 @@ function identityAnswer(request: QueryRequest, byId: Map<string, EvidenceChunk>)
       severity: "medium",
       evidenceIds: ["EV-VCS-CAST-27", "EV-VCS-SECOND-GRANDMA"],
     }],
-    followUpQuestions: ["Do you mean CAST-27 in the operation storyline or USER_0047's grandmother in the customer message?", "Would you like the customer-message binding checked against both entity IDs?"],
+    followUpQuestions: [...VCS_DEMO_FOLLOW_UPS.identity],
     caveats: ["A screenshot can support asset matching, but visual resemblance alone should not establish identity."],
   });
 }
@@ -548,7 +623,153 @@ function relationshipAnswer(request: QueryRequest, byId: Map<string, EvidenceChu
       severity: "high",
       evidenceIds: ["EV-VCS-CAST-27", "EV-VCS-SECOND-GRANDMA"],
     }] : [],
-    followUpQuestions: ["Do you mean CAST-27 or MENTION-USER0047-GRANDMA?", "Which art asset is approved for CAST-27 before the operation?"],
+    followUpQuestions: [...VCS_DEMO_FOLLOW_UPS.relationship],
+  });
+}
+
+function repairAnswer(request: QueryRequest, byId: Map<string, EvidenceChunk>): ContinuityAnswer {
+  return baseAnswer(request, {
+    verdict: "PROPOSAL",
+    truthStatus: "supported",
+    answer: "There is no honest one-line fix because the current prototype has two separate gaps. First, the Days 7–8 economy cannot give the Founder $47,000 in personal money. Second, the game has no hospital-payment action or saved operation result. The smallest complete repair is to add a later personal-income path, then one payment action that deducts $47,000 once, saves grandma-surgery-funded, and unlocks Grandma's recovery scene on later loads.",
+    confidence: "high",
+    evidence: compactReferences([
+      reference(byId, "EV-VCS-NARRATIVE-CONTRACT", "supports", "Establishes the later-story $47,000 operation promise.", "normative"),
+      reference(byId, "EV-VCS-ECONOMY", "supports", "Establishes that the Days 7–8 prototype cannot produce the required personal funds.", "configured"),
+      reference(byId, "EV-VCS-SEED-ROUND", "supports", "Separates company investment capital from the Founder's personal money.", "normative"),
+      reference(byId, "EV-VCS-TRIGGER-REGISTRY", "supports", "Establishes that the current build lacks the payment and persistence transitions.", "configured"),
+      reference(byId, "EV-VCS-ENDING-CONTRACT", "supports", "Defines the saved result and later recovery scene that the repair must unlock.", "normative"),
+    ]),
+    entities: [
+      { id: "FOUNDER", name: "The Founder", type: "protagonist", aliases: ["player"], resolution: "resolved", evidenceIds: ["EV-VCS-NARRATIVE-CONTRACT", "EV-VCS-ECONOMY"] },
+      { id: "CAST-27", name: "Grandma", type: "character", aliases: ["operation patient"], resolution: "resolved", evidenceIds: ["EV-VCS-CAST-27", "EV-VCS-NARRATIVE-CONTRACT"] },
+      { id: "STATE-grandma-surgery-funded", name: "grandma-surgery-funded", type: "story state", aliases: ["operation funded"], resolution: "resolved", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY", "EV-VCS-ENDING-CONTRACT"] },
+    ],
+    dependencies: [
+      { from: "later approved personal-income event", to: "$47,000 in Founder personal funds", claimKey: "producer:founder-personal-funds-47000", claimKind: "configured", relation: "causes", status: "missing", evidenceIds: ["EV-VCS-ECONOMY", "EV-VCS-SEED-ROUND"] },
+      { from: "$47,000 in Founder personal funds", to: "one-time hospital payment", claimKey: "producer:grandma-surgery-funded", claimKind: "configured", relation: "requires", status: "missing", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"] },
+      { from: "one-time hospital payment", to: "grandma-surgery-funded", claimKey: "producer:grandma-surgery-funded", claimKind: "configured", relation: "causes", status: "missing", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"] },
+      { from: "grandma-surgery-funded", to: "Grandma's recovery scene", claimKey: "consumer:grandma-surgery-funded", claimKind: "normative", relation: "requires", status: "blocked", evidenceIds: ["EV-VCS-ENDING-CONTRACT"] },
+    ],
+    proposal: {
+      summary: "Build one end-to-end path from legitimate Founder income to a saved, one-time operation payment.",
+      assumptions: ["The $47,000 operation remains an approved later-story goal.", "Company investment money remains separate from the Founder's personal money."],
+      requiredChanges: [
+        "Implement the later progression that creates legitimate personal income for the Founder.",
+        "Add a hospital-payment action that requires at least $47,000 in personal funds.",
+        "Deduct $47,000 once and persist grandma-surgery-funded in the same successful transaction.",
+        "Use that saved result to retire pre-operation dialogue and unlock Grandma's recovery scene.",
+        "Add success, insufficient-funds, reload, and repeat-action tests.",
+      ],
+      downstreamRisks: ["Using Seed Round company cash directly would break the financing rule.", "Saving the flag separately from the deduction could charge twice or unlock the scene without payment."],
+    },
+    followUpQuestions: [...VCS_DEMO_FOLLOW_UPS.repair],
+    caveats: ["This is the minimum complete path for the promised outcome, not necessarily the smallest code diff."],
+  });
+}
+
+function verificationAnswer(request: QueryRequest, byId: Map<string, EvidenceChunk>): ContinuityAnswer {
+  return baseAnswer(request, {
+    verdict: "SUPPORTED",
+    truthStatus: "supported",
+    answer: "Test the operation as one saved transaction. The important checks are: it fails without $47,000 in personal funds; succeeds at the threshold; deducts exactly $47,000; saves one operation-funded result; unlocks the recovery scene; retires pre-operation dialogue; and, after a repeat click or reload, does not deduct money or unlock the scene a second time. The current prototype cannot run this end-to-end test yet because that later sequence is not implemented.",
+    confidence: "high",
+    evidence: compactReferences([
+      reference(byId, "EV-VCS-TRIGGER-TEST", "supports", "Lists the required success, failure, persistence, and repeat-action cases.", "tested"),
+      reference(byId, "EV-VCS-ENDING-CONTRACT", "supports", "Requires one saved funded result and no second charge after reload.", "normative"),
+      reference(byId, "EV-VCS-TRIGGER-REGISTRY", "context", "Shows why the end-to-end test cannot pass in the current prototype.", "configured"),
+    ]),
+    conclusions: [{
+      claimKey: "tested-operation-threshold",
+      claimKind: "tested",
+      polarity: "positive",
+      basis: "explicit_evidence",
+      statement: "The acceptance-test contract requires threshold, deduction, persistence, recovery-scene, reload, and repeat-action cases.",
+      evidenceIds: ["EV-VCS-TRIGGER-TEST"],
+    }],
+    entities: [
+      { id: "FOUNDER", name: "The Founder", type: "protagonist", aliases: ["player"], resolution: "resolved", evidenceIds: ["EV-VCS-ECONOMY"] },
+      { id: "STATE-grandma-surgery-funded", name: "grandma-surgery-funded", type: "story state", aliases: ["operation funded"], resolution: "resolved", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY", "EV-VCS-ENDING-CONTRACT"] },
+    ],
+    dependencies: [
+      { from: "successful hospital payment", to: "$47,000 personal-balance deduction", claimKey: "tested-operation-threshold", claimKind: "tested", relation: "causes", status: "proposed", evidenceIds: ["EV-VCS-TRIGGER-TEST"] },
+      { from: "successful hospital payment", to: "one saved grandma-surgery-funded result", claimKey: "consumer:grandma-surgery-funded", claimKind: "normative", relation: "causes", status: "proposed", evidenceIds: ["EV-VCS-ENDING-CONTRACT"] },
+      { from: "saved grandma-surgery-funded result", to: "reload without another charge", claimKey: "consumer:grandma-surgery-funded", claimKind: "normative", relation: "prevents", status: "proposed", evidenceIds: ["EV-VCS-ENDING-CONTRACT", "EV-VCS-TRIGGER-TEST"] },
+    ],
+    proposal: {
+      summary: "Add one table-driven operation test suite around the saved payment transaction.",
+      assumptions: ["The payment and persistence changes will be implemented as one atomic operation."],
+      requiredChanges: ["Add insufficient-funds and exact-threshold cases.", "Assert the balance deduction and saved funded result together.", "Reload and repeat the action, then assert that neither money nor story state changes again.", "Assert the recovery scene replaces pre-operation dialogue."],
+      downstreamRisks: ["A UI-only test can miss a duplicate server-side deduction.", "A happy-path-only test can miss reload and repeated-click failures."],
+    },
+    followUpQuestions: [...VCS_DEMO_FOLLOW_UPS.verification],
+  });
+}
+
+function investmentAnswer(request: QueryRequest, byId: Map<string, EvidenceChunk>): ContinuityAnswer {
+  const asksForUnknownPrerequisites = /\b(?:before|prerequisite|prerequisites)\b/.test(normalizedQuestionText(request.question))
+    && /\bseed round\b/.test(normalizedQuestionText(request.question));
+  if (asksForUnknownPrerequisites) {
+    return baseAnswer(request, {
+      verdict: "INSUFFICIENT_EVIDENCE",
+      truthStatus: "unknown",
+      answer: "The reviewed story plan says Marc's Seed Round has prerequisites, but this packet does not name them. It would be unsafe to invent the required customer, revenue, day, or relationship threshold. Add the Seed Round scene specification or its trigger record to answer that question.",
+      confidence: "high",
+      evidence: compactReferences([
+        reference(byId, "EV-VCS-SEED-ROUND", "context", "Confirms that the Seed Round is planned but does not enumerate its trigger conditions.", "normative"),
+      ]),
+      followUpQuestions: [],
+      caveats: ["This is a documented gap in the available sample, not proof that the Seed Round has no prerequisites."],
+    });
+  }
+  return baseAnswer(request, {
+    verdict: "SUPPORTED",
+    truthStatus: "supported",
+    answer: "No—not directly. Marc's Seed Round gives investment capital to the company, while Grandma's hospital bill must be paid from the Founder's legitimate personal money. A later salary, disclosed secondary share sale, dividend, or another approved personal-liquidity event must move value to the Founder before the payment can happen.",
+    confidence: "high",
+    evidence: compactReferences([
+      reference(byId, "EV-VCS-SEED-ROUND", "supports", "Separates Seed Round company capital from the Founder's personal money.", "normative"),
+      reference(byId, "EV-VCS-NARRATIVE-CONTRACT", "supports", "Makes the Founder personally responsible for the $47,000 operation payoff.", "normative"),
+      reference(byId, "EV-VCS-ECONOMY", "supports", "Confirms that company financing and personal money are separate accounts.", "configured"),
+    ]),
+    conclusions: [{
+      claimKey: "constraint:seed-round-company-vs-personal-funds",
+      claimKind: "normative",
+      polarity: "positive",
+      basis: "explicit_evidence",
+      statement: "Marc's Seed Round creates company capital, not personal money that the Founder can spend directly on Grandma's operation.",
+      evidenceIds: ["EV-VCS-SEED-ROUND"],
+    }],
+    entities: [
+      { id: "FOUNDER", name: "The Founder", type: "protagonist", aliases: ["player"], resolution: "resolved", evidenceIds: ["EV-VCS-NARRATIVE-CONTRACT", "EV-VCS-ECONOMY"] },
+      { id: "CAST-27", name: "Grandma", type: "character", aliases: ["operation patient"], resolution: "resolved", evidenceIds: ["EV-VCS-CAST-27"] },
+      { id: "EVENT-SEED-ROUND", name: "Marc's Seed Round", type: "planned event", aliases: ["Seed Round"], resolution: "resolved", evidenceIds: ["EV-VCS-SEED-ROUND"] },
+    ],
+    dependencies: [
+      { from: "Marc's Seed Round", to: "company investment capital", claimKey: "constraint:seed-round-company-vs-personal-funds", claimKind: "normative", relation: "causes", status: "established", evidenceIds: ["EV-VCS-SEED-ROUND"] },
+      { from: "approved personal-liquidity event", to: "$47,000 in Founder personal funds", claimKey: "producer:founder-personal-funds-47000", claimKind: "configured", relation: "causes", status: "missing", evidenceIds: ["EV-VCS-ECONOMY", "EV-VCS-SEED-ROUND"] },
+      { from: "$47,000 in Founder personal funds", to: "hospital payment", claimKey: "producer:grandma-surgery-funded", claimKind: "configured", relation: "requires", status: "missing", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"] },
+    ],
+    followUpQuestions: [...VCS_DEMO_FOLLOW_UPS.investment],
+    caveats: ["The evidence lists acceptable categories of personal liquidity but does not approve one final implementation."],
+  });
+}
+
+function sourceAnswer(request: QueryRequest, byId: Map<string, EvidenceChunk>): ContinuityAnswer {
+  return baseAnswer(request, {
+    verdict: "SUPPORTED",
+    truthStatus: "supported",
+    answer: "The answer comes from several records with different jobs: story canon establishes the promised $47,000 operation; the current prototype contract establishes the Days 7–8 and $700 limits; the trigger registry shows the missing payment transition; the future-story financing plan separates company and personal money; and the ending and test contracts define the saved payoff and checks. No single filename is treated as sufficient by itself.",
+    confidence: "high",
+    evidence: compactReferences([
+      reference(byId, "EV-VCS-NARRATIVE-CONTRACT", "supports", "Defines the promised story outcome.", "normative"),
+      reference(byId, "EV-VCS-ECONOMY", "supports", "Defines what the current prototype can earn.", "configured"),
+      reference(byId, "EV-VCS-TRIGGER-REGISTRY", "supports", "Defines the implemented transition gap.", "configured"),
+      reference(byId, "EV-VCS-SEED-ROUND", "context", "Defines the company-versus-personal financing constraint.", "normative"),
+      reference(byId, "EV-VCS-ENDING-CONTRACT", "context", "Defines the later consumer of the saved operation state.", "normative"),
+      reference(byId, "EV-VCS-TRIGGER-TEST", "context", "Defines the acceptance checks for the future sequence.", "tested"),
+    ]),
+    followUpQuestions: [...VCS_DEMO_FOLLOW_UPS.sources],
   });
 }
 
@@ -558,29 +779,40 @@ function reachabilityAnswer(request: QueryRequest, byId: Map<string, EvidenceChu
     truthStatus: "supported",
     reachability: {
       status: "unreachable_within_scope",
-      completenessScope: "The complete current VCS trigger registry, economy table, narrative contract, and ending gate at vcs-demo-r1.",
-      targetClaimKeys: ["producer:grandma-surgery-funded"],
-      blockers: ["No registered transition converts sufficient available cash into the operation payment and emits grandma-surgery-funded."],
-      assumptions: ["The current registry marked complete is the runtime source of truth for story transitions."],
-      path: ["Narrative contract establishes the Founder's obligation to CAST-27", "Economy can accumulate available cash", "Missing: payment resolver and one-time completion flag"],
+      completenessScope: `The complete Days 7–8 economy and current trigger registry at ${VCS_DEMO_REVISION}, read alongside the story and ending contracts.`,
+      targetClaimKeys: ["producer:founder-personal-funds-47000", "producer:grandma-surgery-funded"],
+      blockers: ["The current prototype cannot produce $47,000 in Founder personal funds.", "No registered transition pays the hospital and persists grandma-surgery-funded."],
+      assumptions: ["The reviewed Days 7–8 economy and trigger registry are complete for the current prototype."],
+      path: ["Story canon establishes the later operation promise", "Missing in this prototype: a personal-income path to $47,000", "Missing: a one-time hospital payment and persisted funded result", "Blocked: Grandma's recovery scene"],
     },
-    answer: "Not in the current audited build. The Founder's $47,000 operation obligation for CAST-27 is canonical, and the economy can increase available cash, but the complete trigger registry has no transition that pays for the operation or emits grandma-surgery-funded. The promise is established; its executable completion path is missing. USER_0047's separately mentioned grandmother is not the patient in this goal.",
+    answer: "No. The current playable prototype covers Days 7 and 8, starts the Founder with $700, and its available jobs and revenue cannot reach $47,000 in personal funds. There is also no transition that pays the hospital and saves Grandma's operation as funded. The wider story promises this outcome later, but the current build contains neither the money path nor the payment path.",
     confidence: "high",
     evidence: compactReferences([
       reference(byId, "EV-VCS-CAST-27", "supports", "Establishes CAST-27 as the Founder's grandmother and the operation patient."),
       reference(byId, "EV-VCS-NARRATIVE-CONTRACT", "supports", "Establishes the required $47,000 payoff."),
-      reference(byId, "EV-VCS-ECONOMY", "context", "Shows that cash accumulation and story completion are separate mechanisms."),
-      reference(byId, "EV-VCS-TRIGGER-REGISTRY", "supports", "The closed-world registry establishes that no configured completion producer currently exists.", "configured"),
+      reference(byId, "EV-VCS-ECONOMY", "supports", "Establishes the $700 opening balance, two-day scope, and missing personal-funds path.", "configured"),
+      reference(byId, "EV-VCS-TRIGGER-REGISTRY", "supports", "The complete registry establishes that no payment or persistence transition currently exists.", "configured"),
+      reference(byId, "EV-VCS-SEED-ROUND", "context", "Shows why later company investment does not itself solve the personal-funds gap.", "normative"),
       reference(byId, "EV-VCS-ENDING-CONTRACT", "supports", "Establishes the intended ending's requirement for the completion flag.", "normative"),
     ]),
-    conclusions: [{
-      claimKey: "producer:grandma-surgery-funded",
-      claimKind: "configured",
-      polarity: "negative",
-      basis: "closed_world_absence",
-      statement: "The complete current trigger registry has no configured producer for grandma-surgery-funded.",
-      evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"],
-    }],
+    conclusions: [
+      {
+        claimKey: "producer:founder-personal-funds-47000",
+        claimKind: "configured",
+        polarity: "negative",
+        basis: "closed_world_absence",
+        statement: "The complete current prototype economy has no path from $700 to $47,000 in Founder personal funds.",
+        evidenceIds: ["EV-VCS-ECONOMY"],
+      },
+      {
+        claimKey: "producer:grandma-surgery-funded",
+        claimKind: "configured",
+        polarity: "negative",
+        basis: "closed_world_absence",
+        statement: "The complete current trigger registry has no configured producer for grandma-surgery-funded.",
+        evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"],
+      },
+    ],
     entities: [
       { id: "CAST-27", name: "Grandma", type: "character", aliases: ["the Founder's grandmother", "operation patient"], resolution: "resolved", evidenceIds: ["EV-VCS-CAST-27"] },
       { id: "FOUNDER", name: "The Founder", type: "protagonist", aliases: ["protagonist"], resolution: "resolved", evidenceIds: ["EV-VCS-CAST-27", "EV-VCS-NARRATIVE-CONTRACT"] },
@@ -588,12 +820,19 @@ function reachabilityAnswer(request: QueryRequest, byId: Map<string, EvidenceChu
     ],
     dependencies: [
       { from: "Founder and CAST-27 relationship", to: "$47,000 operation obligation", claimKey: "required-payoff:grandma-operation", claimKind: "normative", relation: "reveals", status: "established", evidenceIds: ["EV-VCS-NARRATIVE-CONTRACT"] },
-      { from: "sufficient available cash", to: "operation payment resolver", claimKey: "producer:grandma-surgery-funded", claimKind: "configured", relation: "causes", status: "missing", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"] },
+      { from: "current Days 7–8 economy", to: "$47,000 in Founder personal funds", claimKey: "producer:founder-personal-funds-47000", claimKind: "configured", relation: "causes", status: "missing", evidenceIds: ["EV-VCS-ECONOMY"] },
+      { from: "$47,000 in Founder personal funds", to: "operation payment resolver", claimKey: "producer:grandma-surgery-funded", claimKind: "configured", relation: "requires", status: "missing", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"] },
       { from: "operation payment resolver", to: "grandma-surgery-funded", claimKey: "producer:grandma-surgery-funded", claimKind: "configured", relation: "causes", status: "missing", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"] },
       { from: "grandma-surgery-funded", to: "post-operation reading scene", claimKey: "consumer:grandma-surgery-funded", claimKind: "normative", relation: "requires", status: "blocked", evidenceIds: ["EV-VCS-ENDING-CONTRACT"] },
     ],
-    followUpQuestions: ["What is the smallest change that makes the operation reachable?", "Which tests should prove the completion flag fires exactly once?"],
-    caveats: ["This conclusion is scoped to the current complete registry; unindexed code or an unreleased branch could change it."],
+    proposal: {
+      summary: "Build the missing later-story bridge from legitimate Founder income to a saved, one-time hospital payment.",
+      assumptions: ["The $47,000 operation remains an approved future-story promise.", "Company money remains separate from the Founder's personal money."],
+      requiredChanges: ["Add the later progression that gives the Founder at least $47,000 in legitimate personal funds.", "Add one hospital-payment action that deducts $47,000.", "Persist grandma-surgery-funded in the same successful transaction.", "Use the saved result to unlock Grandma's recovery scene and retire pre-operation dialogue.", "Test insufficient funds, success, reload, and a repeated payment attempt."],
+      downstreamRisks: ["Using Seed Round company cash directly would violate the financing rule.", "Separating deduction from persistence could charge twice or unlock the payoff without payment."],
+    },
+    followUpQuestions: [...VCS_DEMO_FOLLOW_UPS.reachability],
+    caveats: ["This conclusion is about the current Days 7–8 prototype. The future story can still fulfill the promise after the missing progression is implemented."],
   });
 }
 
@@ -603,18 +842,19 @@ function blastRadiusAnswer(request: QueryRequest, byId: Map<string, EvidenceChun
     truthStatus: "supported",
     reachability: {
       status: "conditionally_reachable",
-      completenessScope: "The current economy, trigger, test, and ending contracts at vcs-demo-r1.",
-      targetClaimKeys: ["producer:grandma-surgery-funded", "economy-operation-threshold"],
-      blockers: ["The current completion producer is already missing.", "The balance window and tests still encode $47,000."],
-      assumptions: ["The operation remains the same narrative payoff.", "The Day 24 target window remains desirable."],
-      path: ["Rebalance income or extend the window", "Update the operation threshold", "Add a one-time payment resolver", "Persist grandma-surgery-funded", "Unlock the ending scene"],
+      completenessScope: `The story, prototype, financing, trigger, ending, and test contracts at ${VCS_DEMO_REVISION}.`,
+      targetClaimKeys: ["required-payoff:grandma-operation", "producer:founder-personal-funds-47000", "producer:grandma-surgery-funded"],
+      blockers: ["The current prototype cannot reach even the approved $47,000 amount.", "The one-time payment and saved result are not implemented."],
+      assumptions: ["Grandma's operation remains the same later-story payoff.", "The higher amount would be approved as a canon change before implementation."],
+      path: ["Approve the new amount in story canon", "Revise the later personal-income path", "Update every displayed amount and payment rule", "Implement the one-time payment", "Update the acceptance tests and recovery-scene gate"],
     },
-    answer: "A $60,000 operation can remain narratively possible, but it is a change proposal rather than current canon. It affects at least four connected surfaces: the required income curve, the Day 24 eligibility window, the $28,000 investment trade-off, and the payoff fixtures. It also inherits the existing missing-trigger problem, so changing one price literal would not make the outcome playable.",
+    answer: "A $60,000 operation could work, but it would be a proposed canon change, not a single-number edit. It would change the promised story amount, the later personal-income path, every dialogue or screen that displays $47,000, the hospital-payment validation and deduction, and the acceptance tests. The current Days 7–8 prototype would still be unable to reach the outcome, and it would still need the missing payment and saved result.",
     confidence: "high",
     evidence: compactReferences([
       reference(byId, "EV-VCS-NARRATIVE-CONTRACT", "opposes", "The current canonical operation contract establishes a $47,000 cost."),
-      reference(byId, "EV-VCS-ECONOMY", "supports", "Identifies the balance window and investment trade-off affected by a higher target."),
-      reference(byId, "EV-VCS-TRIGGER-TEST", "supports", "Identifies fixtures and assertions that encode $47,000."),
+      reference(byId, "EV-VCS-ECONOMY", "supports", "Establishes that the current prototype cannot reach the existing amount and separates personal from company money.", "configured"),
+      reference(byId, "EV-VCS-SEED-ROUND", "supports", "Shows that the later personal-liquidity plan would need to cover the higher target.", "normative"),
+      reference(byId, "EV-VCS-TRIGGER-TEST", "supports", "Identifies the threshold, deduction, persistence, and replay checks that must change.", "tested"),
       reference(byId, "EV-VCS-TRIGGER-REGISTRY", "context", "Shows the pre-existing missing completion producer that a threshold edit would not repair."),
       reference(byId, "EV-VCS-ENDING-CONTRACT", "context", "Shows the downstream state consumed by the ending payoff."),
     ]),
@@ -634,19 +874,19 @@ function blastRadiusAnswer(request: QueryRequest, byId: Map<string, EvidenceChun
       evidenceIds: ["EV-VCS-NARRATIVE-CONTRACT", "EV-VCS-ECONOMY", "EV-VCS-TRIGGER-TEST"],
     }],
     dependencies: [
-      { from: "$60,000 operation cost", to: "required income curve", claimKey: "proposal:operation-cost:60000:income-curve", claimKind: "causal", relation: "causes", status: "proposed", evidenceIds: ["EV-VCS-ECONOMY"] },
-      { from: "$60,000 operation cost", to: "Day 24 target window", claimKey: "proposal:operation-cost:60000:day-window", claimKind: "causal", relation: "causes", status: "proposed", evidenceIds: ["EV-VCS-ECONOMY"] },
-      { from: "$60,000 operation cost", to: "investment pacing", claimKey: "proposal:operation-cost:60000:investment", claimKind: "causal", relation: "causes", status: "proposed", evidenceIds: ["EV-VCS-ECONOMY"] },
+      { from: "$60,000 operation cost", to: "approved story promise and displayed amount", claimKey: "proposal:operation-cost:60000:story", claimKind: "causal", relation: "causes", status: "proposed", evidenceIds: ["EV-VCS-NARRATIVE-CONTRACT"] },
+      { from: "$60,000 operation cost", to: "later Founder personal-income requirement", claimKey: "proposal:operation-cost:60000:personal-funds", claimKind: "causal", relation: "causes", status: "proposed", evidenceIds: ["EV-VCS-ECONOMY", "EV-VCS-SEED-ROUND"] },
+      { from: "$60,000 operation cost", to: "hospital validation and deduction", claimKey: "proposal:operation-cost:60000:payment", claimKind: "causal", relation: "causes", status: "proposed", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY", "EV-VCS-TRIGGER-TEST"] },
       { from: "$60,000 operation cost", to: "payoff regression tests", claimKey: "proposal:operation-cost:60000:tests", claimKind: "causal", relation: "causes", status: "proposed", evidenceIds: ["EV-VCS-TRIGGER-TEST"] },
       { from: "payment resolver", to: "grandma-surgery-funded", claimKey: "producer:grandma-surgery-funded", claimKind: "causal", relation: "causes", status: "missing", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"] },
     ],
     proposal: {
-      summary: "Raise the operation target to $60,000 as one versioned story-and-system change, then rebalance and test the full completion path.",
-      assumptions: ["The operation remains a fixed-dollar goal.", "The player should still reach the payoff within a bounded, satisfying number of days.", "The investment proposal remains a meaningful trade-off rather than a mandatory solution."],
-      requiredChanges: ["Revise the Day 8 and narrative contracts.", "Rebalance the income curve or target window.", "Recalculate the investment diversion and recovery path.", "Add the missing one-time payment resolver.", "Update $47,000 payoff fixtures and ending-gate tests."],
-      downstreamRisks: ["Longer grind or accidental pay-to-win pacing.", "Investment becomes the only viable route.", "Old dialogue displays the retired amount.", "The post-operation scene fires late, twice, or not at all."],
+      summary: "Raise the operation target to $60,000 as one versioned story, economy, interface, payment, and test change.",
+      assumptions: ["The operation remains a fixed-dollar later-story goal.", "The player should reach it through legitimate personal income rather than company cash."],
+      requiredChanges: ["Approve $60,000 in the story source of truth.", "Revise the later personal-liquidity target and pacing.", "Update all dialogue and interface references to $47,000.", "Make the future payment require and deduct $60,000 once.", "Update threshold, persistence, reload, and recovery-scene tests."],
+      downstreamRisks: ["Old dialogue or UI may retain the retired amount.", "The higher target may turn intended progression into excessive grind.", "Company financing may accidentally be treated as personal money.", "The post-operation scene may unlock for the old threshold or charge twice."],
     },
-    followUpQuestions: ["Must the Day 24 window stay fixed?", "Should the investment route be optional, necessary, or one of several viable paths?"],
+    followUpQuestions: [...VCS_DEMO_FOLLOW_UPS.blastRadius],
     caveats: ["The proposal is not canon until its source revision is approved."],
   });
 }
@@ -655,9 +895,9 @@ function insufficientAnswer(request: QueryRequest): ContinuityAnswer {
   return baseAnswer(request, {
     verdict: "INSUFFICIENT_EVIDENCE",
     truthStatus: "unknown",
-    answer: "The indexed VCS demonstration packet does not contain enough directly relevant evidence to answer that question safely. Add or identify the governing source, then ask again so the answer can be traced to it.",
+    answer: "The worked example does not contain enough information to answer that question without guessing. Try one of the example questions, or add the missing story, game, or test material in your own workspace.",
     confidence: "low",
-    followUpQuestions: ["Which source should govern this question?", "Is this asking about established canon, executable game state, or a proposed change?"],
+    followUpQuestions: [],
     caveats: ["Retrieved context is not treated as proof when it does not address the question."],
   });
 }
@@ -717,15 +957,28 @@ function compactReferences(references: Array<EvidenceReference | null>): Evidenc
 
 function demoAnalysisChecks(answer: ContinuityAnswer, route?: AnalysisRoute): ContinuityAnswer["analysisChecks"] {
   return (route?.requiredChecks ?? []).map((check) => {
-    const explicitlyOpen = check === "actor_knowledge_and_authorization" || check === "resource_conservation";
-    if (explicitlyOpen && answer.verdict === "UNREACHABLE") {
+    if (answer.verdict === "UNREACHABLE" && check === "identity_scope") {
       return {
         check,
-        status: "unknown" as const,
-        finding: check === "actor_knowledge_and_authorization"
-          ? "The reviewed sample does not establish an authorized actor for the missing payment transition."
-          : "The reviewed sample establishes the target and diversion, but not a complete executable ledger path.",
-        evidenceIds: [],
+        status: "supported" as const,
+        finding: "The operation patient is CAST-27, the Founder's grandmother; USER_0047's grandmother is a separate person.",
+        evidenceIds: ["EV-VCS-CAST-27", "EV-VCS-NARRATIVE-CONTRACT"],
+      };
+    }
+    if (answer.verdict === "UNREACHABLE" && check === "actor_knowledge_and_authorization") {
+      return {
+        check,
+        status: "not_applicable" as const,
+        finding: "No payment action exists yet, so there is no implemented actor authorization to evaluate.",
+        evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"],
+      };
+    }
+    if (answer.verdict === "UNREACHABLE" && check === "resource_conservation") {
+      return {
+        check,
+        status: "supported" as const,
+        finding: "The current personal account starts at $700, cannot reach $47,000 in this slice, and remains separate from company financing.",
+        evidenceIds: ["EV-VCS-ECONOMY", "EV-VCS-SEED-ROUND"],
       };
     }
     const evidenceIds = answer.evidence

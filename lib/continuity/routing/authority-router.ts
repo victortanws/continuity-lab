@@ -307,7 +307,10 @@ function requestedClaimKinds(request: QueryRequest, mode: AnalysisMode): ClaimKi
   if (mode === "evaluate_change") {
     return ["identity", "normative", "configured", "implemented", "tested", "observed", "causal", "historical"];
   }
-  if (mode === "trace_dependencies") return ["configured", "implemented", "tested", "observed", "causal"];
+  // Dependency edges are only meaningful when their actors and targets resolve
+  // to the right entities. Keep identity evidence in every trace instead of
+  // asking the validator to check identity after retrieval has excluded it.
+  if (mode === "trace_dependencies") return ["identity", "configured", "implemented", "tested", "observed", "causal"];
   const focused = inferFocusedClaimKinds(request.question);
   if (focused) return [...new Set([...focused, ...requested])];
   // Ordinary questions still need the complete active truth boundary. In

@@ -1909,7 +1909,7 @@ test("the VCS Day 8 to Day 24 trace preserves the promise and identifies the mis
   assert.equal(result.answer.timeScope, "Day 8 through Day 24");
   assert.ok(result.answer.dependencies.some((edge) => edge.claimKey === "producer:grandma-surgery-funded" && edge.status === "missing"));
   assert.ok(result.answer.dependencies.some((edge) => edge.claimKey === "consumer:grandma-surgery-funded"));
-  assert.match(result.answer.answer, /payment resolver|completion path is missing/i);
+  assert.match(result.answer.answer, /no transition|payment path|cannot reach \$47,000/i);
 });
 
 test("reachability reports an unmet producer prerequisite", () => {

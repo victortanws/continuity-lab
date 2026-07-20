@@ -7,6 +7,7 @@ import {
   VCS_DEMO_COMPLETENESS_REGISTRY,
   VCS_DEMO_REVISION,
 } from "@/lib/continuity/demo";
+import { VCS_DEMO_QUESTIONS, VCS_DEMO_TIME_SCOPE } from "@/lib/continuity/demo-questions";
 import {
   CompositeRetriever,
   CONTINUITY_INPUT_LIMITS,
@@ -52,11 +53,11 @@ const CLAIM_KINDS = new Set<ClaimKind>([
 const ENGINE_PREFERENCES = new Set(["auto", "demo", "live"] as const);
 type EnginePreference = "auto" | "demo" | "live";
 const REVIEWED_LIVE_DEMO = Object.freeze({
-  question: "Can the founder pay for the $47,000 operation by Day 24—and what must be built if not?",
-  timeScope: "through the current VCS demonstration build",
+  question: VCS_DEMO_QUESTIONS.reachability,
+  timeScope: VCS_DEMO_TIME_SCOPE,
   temporalAxis: "day",
   storyPosition: 8,
-  targetPosition: 24,
+  targetPosition: 8,
   analysisMode: "trace_dependencies" as const,
 });
 const REVIEWED_LIVE_DEMO_ALLOWED_FIELDS = new Set([
@@ -168,7 +169,7 @@ export function buildReviewedLiveDemoQuery(): QueryRequest {
     contextRefs: [],
     targetClaimKeys: demoTargetClaimKeys(REVIEWED_LIVE_DEMO.question, null),
     coverage: {
-      scope: "The complete frozen VCS demonstration contract, economy, cast, dialogue, asset records, and trigger registry.",
+      scope: "The current Vibe Code Simulator story plan, economy, cast, dialogue, art notes, and game events.",
       complete: true,
     },
   };
@@ -704,7 +705,7 @@ export async function POST(request: Request) {
       contextRefs: cleanStringArray(payload.contextRefs),
       targetClaimKeys: demoTargetClaimKeys(question, proposedChange),
       coverage: {
-        scope: "The complete frozen VCS demonstration contract, economy, cast, dialogue, asset records, and trigger registry.",
+        scope: "The current Vibe Code Simulator story plan, economy, cast, dialogue, art notes, and game events.",
         complete: true,
       },
     };
@@ -781,7 +782,7 @@ export async function POST(request: Request) {
       targetClaimKeys: projectId === "vcs-demo" ? demoTargetClaimKeys(question, proposedChange) : [],
       coverage: projectId === "vcs-demo"
         ? {
-            scope: `The complete current VCS trigger registry plus the demo contract, economy, cast, dialogue, and asset records.${repositoryScope}`,
+            scope: `The current Vibe Code Simulator game events, story plan, economy, cast, dialogue, and art notes.${repositoryScope}`,
             complete: activeRepositorySnapshot ? Boolean(activeRepositorySnapshot.coverageComplete) : true,
           }
         : {

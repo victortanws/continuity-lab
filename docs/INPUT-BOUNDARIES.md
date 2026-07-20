@@ -31,7 +31,8 @@ it accepts only its exact server-owned receipt and rejects every extra field.
 ## Stateless MCP envelope
 
 The `/mcp` route accepts at most 32 KiB of JSON, including protocol and schema
-overhead. Its v3.2 reviewed-sample calls remain pinned to `vcs-demo-r1`.
+overhead. Its reviewed-sample calls remain pinned to `vcs-demo-r2`; the v3.2
+and v3.3 tool schemas remain compatible while the sample revision is explicit.
 
 `continuity_compile_material` accepts at most eight named text documents and 64
 total claim, entity-mention, and relation proposals. The advertised per-document

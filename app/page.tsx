@@ -1,6 +1,8 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { VCS_DEMO_FOLLOW_UPS, VCS_DEMO_QUESTIONS, VCS_DEMO_SUGGESTED_QUESTIONS, VCS_DEMO_TIME_SCOPE } from "@/lib/continuity/demo-questions";
+import { analysisModeForQuestion } from "@/lib/continuity/question-intent";
 
 type Verdict = "SUPPORTED" | "CONFLICT" | "AMBIGUOUS" | "UNREACHABLE" | "INSUFFICIENT_EVIDENCE" | "PROPOSAL";
 type EngineMode = "ready" | "demonstration" | "gpt-5.6-sol" | "unavailable";
@@ -100,28 +102,28 @@ type RepositoryState = {
 
 const SAMPLE_PROJECT_ID = "vcs-demo";
 const WORKSPACE_PROJECT_ID = "continuity-workspace";
-const DEFAULT_QUESTION = "Can the founder pay for the $47,000 operation by Day 24—and what must be built if not?";
+const DEFAULT_QUESTION: string = VCS_DEMO_QUESTIONS.reachability;
 
 const REVIEWED_EXAMPLE_RECEIPT: AnalysisReceipt = {
   question: DEFAULT_QUESTION,
   projectId: SAMPLE_PROJECT_ID,
   projectMode: "sample",
-  timeScope: "through the current Vibe Code Simulator demonstration build",
+  timeScope: VCS_DEMO_TIME_SCOPE,
   temporalAxis: "day",
   storyPosition: 8,
-  targetPosition: 24,
+  targetPosition: 8,
 };
 
 const REVIEWED_EXAMPLE_ANSWER: UiAnswer = {
   status: "NOT REACHABLE IN THIS PROTOTYPE",
   tone: "danger",
   headline: "No. The current prototype cannot earn or pay the $47,000.",
-  summary: "The playable build covers only Days 7–8 and starts with $700. Its available income cannot reach $47,000 in that slice. The wider story plans to fund the operation later, after a Seed Round creates legitimate personal income for the Founder, but neither that progression nor the operation-payment action exists in the current game.",
+  summary: "The playable build covers only Days 7–8 and starts with $700. Its available income cannot reach $47,000 in that slice. The wider story plans to fund the operation later, after a Seed Round grows the company and a separate approved event gives the Founder legitimate personal income, but neither that progression nor the operation-payment action exists in the current game.",
   verdict: "UNREACHABLE",
   confidence: "high",
-  revision: "current-prototype",
+  revision: "vcs-demo-r2",
   scope: "The current prototype contract, story canon, game code, and tests",
-  coverageClosure: "closed",
+  coverageClosure: "open",
   evidence: [
     { evidenceId: "EV-VCS-NARRATIVE-CONTRACT", sourceId: "Story canon", locator: "Current playable slice", stance: "supports", supports: "The operation is a later-story obligation and is explicitly not reachable in the current Days 7–8 slice.", title: "Story canon" },
     { evidenceId: "EV-VCS-ECONOMY", sourceId: "Prototype contract", locator: "Opening economy", stance: "supports", supports: "The two-day demonstration starts with $700 and its displayed income and costs are designed only for that short chapter.", title: "Prototype contract" },
@@ -147,7 +149,7 @@ const REVIEWED_EXAMPLE_ANSWER: UiAnswer = {
     requiredChanges: ["Implement the later Seed Round chapter and its requirements.", "Add an approved source of the Founder's personal funds, such as salary, a disclosed secondary sale, or a dividend.", "Add a one-time hospital payment action that uses those personal funds—not company cash.", "Save the operation-funded result and use it to unlock Grandma's recovery scene.", "Add a test that proves the complete sequence works and cannot charge twice."],
     downstreamRisks: ["Marc's later Seed Round gives the company money; it does not automatically give the Founder personal money for Grandma's bill. The financing terms and the personal-liquidity event must remain separate.", "Grandma's recovery scene and pre-operation activity art must both use the same operation-funded result, or the story can show her as still waiting after payment."],
   },
-  followUps: ["Who does “Grandma” mean in the Day 8 customer message?", "What must happen before Marc's Seed Round offer appears?", "If the operation costs $60,000, what else must change?"],
+  followUps: [...VCS_DEMO_FOLLOW_UPS.reachability],
   depth: "full",
 };
 
@@ -178,14 +180,10 @@ const EMPTY_REPOSITORY: RepositoryState = {
   repository: "No repository connected",
   ref: "Default branch",
   commit: "Not saved yet",
-  message: "Paste a public GitHub link. We read selected files but never run the code.",
+  message: "Add a public repository. We look for likely sources of truth and relevant code or tests, but never run the code.",
 };
 
-const SUGGESTED_QUESTIONS = [
-  "Can the player actually save Grandma by Day 24?",
-  "Who does “Grandma” mean in the Day 8 customer message?",
-  "If the operation costs $60,000, what else must change?",
-];
+const SUGGESTED_QUESTIONS = [...VCS_DEMO_SUGGESTED_QUESTIONS];
 
 const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -236,8 +234,15 @@ export default function Home() {
     && analysisReceipt.timeScope === REVIEWED_EXAMPLE_RECEIPT.timeScope
     && analysisReceipt.temporalAxis === "day"
     && analysisReceipt.storyPosition === 8
-    && analysisReceipt.targetPosition === 24,
+    && analysisReceipt.targetPosition === 8,
   );
+  const canDownloadWorkspaceResults = Boolean(
+    hasAnalyzed
+    && analysisReceipt?.projectMode === "workspace"
+    && workspaceEvidenceCount > 0,
+  );
+  const showDetailedAnalysis = answer.verdict !== "INSUFFICIENT_EVIDENCE" || answer.evidence.length > 0;
+  const visibleChecks = answer.checks.filter((item) => !isGenericMissingCheck(item));
 
   const projectStats = useMemo(() => [
     { value: answer.entities.length, label: "people and things found" },
@@ -450,10 +455,14 @@ export default function Home() {
     window.setTimeout(() => setToast(""), 2800);
   }
 
-  function showReviewedExample(nextQuestion = DEFAULT_QUESTION) {
+  function showReviewedExample(nextQuestion: string = DEFAULT_QUESTION) {
     setProjectMode("sample");
     setQuestion(nextQuestion);
-    const receipt = { ...REVIEWED_EXAMPLE_RECEIPT, question: nextQuestion, targetPosition: inferTargetPosition(nextQuestion) };
+    const receipt = {
+      ...REVIEWED_EXAMPLE_RECEIPT,
+      question: nextQuestion,
+      targetPosition: inferTargetPosition(nextQuestion) ?? (nextQuestion === DEFAULT_QUESTION ? 8 : undefined),
+    };
     void analyze(nextQuestion, "demo", receipt);
   }
 
@@ -488,7 +497,7 @@ export default function Home() {
       <nav className="topbar">
         <a className="brand" href="#top" aria-label="Continuity Lab home"><span className="brand-mark"><Icon name="branch" size={18}/></span><span>Continuity <i>Lab</i></span></a>
         <div className="nav-status"><span className="status-dot"/><span>{sourceLabel}</span></div>
-        <div className="nav-actions"><a href="#sources">How it works</a><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}><Icon name={theme === "dark" ? "sun" : "moon"} size={15}/><span>{theme === "dark" ? "Light" : "Dark"}</span></button><button onClick={exportTrace} disabled={!hasAnalyzed}><Icon name="download" size={15}/> Download results</button></div>
+        <div className="nav-actions"><a href="#sources">How it works</a><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}><Icon name={theme === "dark" ? "sun" : "moon"} size={15}/><span>{theme === "dark" ? "Light" : "Dark"}</span></button>{canDownloadWorkspaceResults && <button onClick={exportTrace}><Icon name="download" size={15}/> Download my results</button>}</div>
       </nav>
 
       <section className="hero" id="top">
@@ -561,12 +570,19 @@ export default function Home() {
             <h3>{answer.headline}</h3>
             <p>{answer.summary}</p>
           </article>
-          {answer.depth === "full" || showFullTrace
+          {!showDetailedAnalysis
+            ? <div className="focused-route"><strong>More material needed</strong><span>No supporting source was found</span></div>
+            : answer.depth === "full" || showFullTrace
             ? <div className="stat-grid">{projectStats.map((stat) => <div key={stat.label}><strong>{stat.value}</strong><span>{stat.label}</span></div>)}</div>
             : <div className="focused-route"><strong>Focused answer</strong><span>{answer.evidence.length} decisive source{answer.evidence.length === 1 ? "" : "s"}</span></div>}
         </div>
 
-        {answer.depth === "focused" && !showFullTrace ? (
+        {!showDetailedAnalysis ? (
+          <article className="focused-answer-trace">
+            <div><span>WHAT TO DO NEXT</span><strong>Add the missing material, then ask again.</strong><small>Upload the relevant story, rule, code, or test—or connect the public repository that contains it.</small></div>
+            <button type="button" onClick={() => document.getElementById("sources")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Add material <Icon name="arrow" size={14}/></button>
+          </article>
+        ) : answer.depth === "focused" && !showFullTrace ? (
           <article className="focused-answer-trace">
             <div><span>KEY CONTEXT</span><strong>{answer.entities.slice(0, 4).map((entity) => entity.name).join(" · ") || "No person or item was identified confidently"}</strong><small>{answer.evidence.slice(0, 3).map((item) => item.title || item.sourceId).join(" · ") || "No supporting source was found"}</small></div>
             <button type="button" onClick={() => setShowFullTrace(true)}>Show sources and dependencies <Icon name="arrow" size={14}/></button>
@@ -597,7 +613,7 @@ export default function Home() {
             </article>
           </div>
 
-          {answer.checks.length > 0 && <article className="closure-audit"><div className="card-heading"><div><span>WHAT WE CHECKED</span><h3>Known, conflicting, and missing information</h3></div><small>{answer.checks.filter((item) => item.status === "unknown").length} still unknown</small></div><div className="closure-grid">{answer.checks.map((item) => <div key={item.check} className={item.status}><span>{checkStatusLabel(item.status)}</span><strong>{checkLabel(item.check)}</strong><p>{item.finding}</p></div>)}</div></article>}
+          {visibleChecks.length > 0 && <article className="closure-audit"><div className="card-heading"><div><span>WHAT WE CHECKED</span><h3>Checks behind this answer</h3></div><small>{visibleChecks.filter((item) => item.status === "unknown").length ? `${visibleChecks.filter((item) => item.status === "unknown").length} question${visibleChecks.filter((item) => item.status === "unknown").length === 1 ? "" : "s"} remain` : "No unanswered checks"}</small></div><div className="closure-grid">{visibleChecks.map((item) => <div key={item.check} className={item.status}><span>{checkStatusLabel(item.status)}</span><strong>{checkLabel(item.check)}</strong><p>{checkFinding(item)}</p></div>)}</div></article>}
         </>}
 
         {answer.conflicts.length > 0 && <div className="conflict-strip"><strong>{answer.conflicts.length} conflict{answer.conflicts.length === 1 ? "" : "s"} found</strong>{answer.conflicts.map((conflict) => <p key={`${conflict.type}-${conflict.statement}`}><span>{conflict.severity}</span>{conflict.statement}</p>)}</div>}
@@ -630,7 +646,7 @@ function UploadPanel({ sources, isUploading, documentType, setDocumentType, onCh
 }
 
 function GitHubPanel({ repository, repositoryUrl, repositoryRef, setRepositoryUrl, setRepositoryRef, onSubmit }: { repository: RepositoryState; repositoryUrl: string; repositoryRef: string; setRepositoryUrl: (value: string) => void; setRepositoryRef: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <div className="github-panel"><form onSubmit={(event) => void onSubmit(event)}><div className="panel-kicker">CONNECT GITHUB</div><h3>Use a public GitHub repository.</h3><p>Paste the repository link. We save the exact version you choose, so every answer refers to the same files even if the repository changes later. Leave the version blank to use its current default branch.</p><label><span>Public repository URL</span><input type="url" placeholder="https://github.com/your-team/your-game" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} required/></label><label><span>Version to use <i>optional</i></span><input aria-describedby="repository-version-hint" placeholder="Current default branch" value={repositoryRef} onChange={(event) => setRepositoryRef(event.target.value)}/><small id="repository-version-hint">A branch, release tag, or commit ID</small></label><button className="dark-button" disabled={repository.phase === "syncing" || !repositoryUrl.trim()}>{repository.phase === "syncing" ? <span className="spinner light"/> : <Icon name="branch" size={17}/>} {repository.phase === "syncing" ? "Connecting…" : "Add repository"}</button></form><div className={`repo-receipt ${repository.phase}`}><div className="receipt-head"><span/><strong>{repository.phase === "ready" ? "Repository ready" : repository.phase === "syncing" ? "Connecting repository" : repository.phase === "attention" ? "Needs attention" : "Ready to connect"}</strong></div><dl><div><dt>Repository</dt><dd>{shortRepository(repository.repository)}</dd></div><div><dt>Version</dt><dd>{repository.ref}</dd></div><div><dt>Saved copy</dt><dd>{shortCommit(repository.commit)}</dd></div>{typeof repository.fileCount === "number" && <div><dt>Files available</dt><dd>{repository.fileCount}</dd></div>}<div><dt>Access</dt><dd>{repository.capability ? repository.capability.replaceAll("_", " ") : "not connected"}</dd></div></dl><p>{repository.message}</p></div></div>;
+  return <div className="github-panel"><form onSubmit={(event) => void onSubmit(event)}><div className="panel-kicker">CONNECT GITHUB</div><h3>Find the project&apos;s source of truth.</h3><p>Paste a public repository. Continuity Lab looks for likely sources of truth—such as <code>STORY-CANON.md</code>, a story bible, product contract, or decision record—and compares them with relevant code and tests. That is how it found <code>docs/STORY-CANON.md</code> in Vibe Code Simulator. A filename is a clue, not automatic proof that a file is approved canon.</p><p>We save the exact version you choose, so later changes cannot silently rewrite an old answer. Leave the version blank to use the current default branch.</p><label><span>Public repository URL</span><input type="url" placeholder="https://github.com/your-team/your-game" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} required/></label><label><span>Version to use <i>optional</i></span><input aria-describedby="repository-version-hint" placeholder="Current default branch" value={repositoryRef} onChange={(event) => setRepositoryRef(event.target.value)}/><small id="repository-version-hint">A branch, release tag, or commit ID</small></label><button className="dark-button" disabled={repository.phase === "syncing" || !repositoryUrl.trim()}>{repository.phase === "syncing" ? <span className="spinner light"/> : <Icon name="branch" size={17}/>} {repository.phase === "syncing" ? "Connecting…" : "Add repository"}</button></form><div className={`repo-receipt ${repository.phase}`}><div className="receipt-head"><span/><strong>{repository.phase === "ready" ? "Repository ready" : repository.phase === "syncing" ? "Connecting repository" : repository.phase === "attention" ? "Needs attention" : "Ready to connect"}</strong></div><dl><div><dt>Repository</dt><dd>{shortRepository(repository.repository)}</dd></div><div><dt>Version</dt><dd>{repository.ref}</dd></div><div><dt>Saved copy</dt><dd>{shortCommit(repository.commit)}</dd></div>{typeof repository.fileCount === "number" && <div><dt>Files available</dt><dd>{repository.fileCount}</dd></div>}<div><dt>Access</dt><dd>{repository.capability ? repository.capability.replaceAll("_", " ") : "not connected"}</dd></div></dl><p>{repository.message}</p></div></div>;
 }
 
 function McpPanel() {
@@ -699,11 +715,48 @@ function checkStatusLabel(status: AnalysisCheckFinding["status"]) {
 }
 
 function checkLabel(check: string) {
-  return check.replaceAll("_", " ")
-    .replace("entity identity", "who or what is meant")
-    .replace("temporal ordering", "when events happen")
-    .replace("downstream consumers", "later effects")
-    .replace("verification and unknowns", "remaining unknowns");
+  const labels: Record<string, string> = {
+    identity_scope: "Who and what this refers to",
+    authority_and_lifecycle: "Which sources apply",
+    temporal_scope: "When this is true",
+    claim_boundary: "What the answer can claim",
+    preconditions_and_reachability: "What has to happen first",
+    actor_knowledge_and_authorization: "Who knows and who may act",
+    resource_conservation: "Where the money or item comes from",
+    transition_ordering: "The order of events",
+    repeatability_and_idempotency: "What happens if it runs again",
+    state_and_asset_compatibility: "Story and visual consistency",
+    downstream_consumers: "Later scenes and systems",
+    verification_and_unknowns: "Tests and remaining uncertainty",
+  };
+  return labels[check] ?? check.replaceAll("_", " ");
+}
+
+function isGenericMissingCheck(item: AnalysisCheckFinding) {
+  return item.status === "unknown"
+    && item.evidenceIds.length === 0
+    && item.finding.toLowerCase().includes("no evidence for this dimension");
+}
+
+function checkFinding(item: AnalysisCheckFinding) {
+  if (item.status === "conflicted" || item.status === "unknown") return item.finding;
+  if (item.status === "not_applicable") return "This question does not depend on this check.";
+
+  const findings: Record<string, string> = {
+    identity_scope: "The relevant people and things were matched to the cited sources.",
+    authority_and_lifecycle: "The answer uses the sources that apply to this version of the project.",
+    temporal_scope: "The answer states which part and version of the story it describes.",
+    claim_boundary: "Current facts, future plans, and suggested changes are kept separate.",
+    preconditions_and_reachability: "The required earlier events and missing steps were checked.",
+    actor_knowledge_and_authorization: "The answer checks who knows about the event and who is allowed to act.",
+    resource_conservation: "Money, items, or other limited resources have an identified source and use.",
+    transition_ordering: "The required events are placed in a workable order.",
+    repeatability_and_idempotency: "The answer checks what happens on reload or a repeated action.",
+    state_and_asset_compatibility: "Story state and visible art or interface state were compared.",
+    downstream_consumers: "Later scenes and systems that depend on this result were checked.",
+    verification_and_unknowns: "The answer names the tests needed and does not hide remaining uncertainty.",
+  };
+  return findings[item.check] ?? item.finding;
 }
 
 function presentAnswer(raw: Record<string, unknown>, retrievedEvidence: Array<Record<string, unknown>> = [], routing?: RoutingReceipt): UiAnswer {
@@ -790,11 +843,8 @@ function shortRevision(value: string) { return value.length > 24 ? `${value.slic
 function formatBytes(value: number) { if (value < 1000) return `${value} B`; if (value < 1_000_000) return `${Math.round(value / 1000)} KB`; return `${(value / 1_000_000).toFixed(1)} MB`; }
 
 function analysisRequestFor(question: string): { mode: AnalysisMode; proposedChange: string | null } {
-  const normalized = question.toLowerCase();
-  const evaluatesChange = /\bwhat (?:breaks|changes|is affected)\b|\bblast radius\b|\bif (?:we |i )?(?:change|remove|replace|add|move)\b|\bchanges? (?:to|from)\b/.test(normalized);
-  if (evaluatesChange) return { mode: "evaluate_change", proposedChange: question };
-  const tracesDependencies = /\bmust happen\b|\bdepend(?:s|encies)?\b|\bprerequisite\b|\btrigger\b|\bproducer\b|\breach(?:able|ability)?\b|\bcan .+ (?:pay|reach|unlock|occur|happen)\b/.test(normalized);
-  return { mode: tracesDependencies ? "trace_dependencies" : "answer_question", proposedChange: null };
+  const mode = analysisModeForQuestion(question);
+  return { mode, proposedChange: mode === "evaluate_change" ? question : null };
 }
 
 function inferTargetPosition(question: string): number | undefined {

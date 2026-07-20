@@ -54,5 +54,5 @@ test("the built worker exposes the Sites-compatible MCP alias", async () => {
   assert.equal(body.result.tools.length, 5);
   assert.equal(body.result.tools[0]._meta["continuity/contractVersion"], "continuity.mcp.v1");
   assert.equal(body.result.tools[0].inputSchema.properties.projectId.default, "vcs-demo");
-  assert.equal(body.result.tools[0].inputSchema.properties.projectRevision.default, "vcs-demo-r1");
+  assert.equal(body.result.tools[0].inputSchema.properties.projectRevision.default, "vcs-demo-r2");
 });

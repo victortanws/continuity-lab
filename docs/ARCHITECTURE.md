@@ -400,7 +400,7 @@ and `continuity_analyze_change`. Stable resources use
 mutation, and canon approval are separate authenticated and consented tools.
 
 The transport implements initialization, tool discovery, and five read-only
-calls at `/mcp`. Three remain pinned to `vcs-demo-r1` and invoke only the
+calls at `/mcp`. Three remain pinned to `vcs-demo-r2` and invoke only the
 deterministic demonstration engine. `continuity_compile_material` verifies
 caller-proposed exact spans and source-scoped entity mentions in a bounded text
 packet. It requires an explicit intransitive marker plus one terminal copied

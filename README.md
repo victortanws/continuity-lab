@@ -23,9 +23,9 @@ and turns them into a concrete development plan.
 1. Open the site. The Vibe Code Simulator example is already visible.
 2. Choose one of the example questions, such as:
 
-   - “Can the player actually save Grandma by Day 24?”
+   - “Can the player earn and pay $47,000 in the current prototype?”
    - “Who does ‘Grandma’ mean in the Day 8 customer message?”
-   - “If the operation costs $60,000, what else must change?”
+   - “If Grandma's operation cost changed to $60,000, what else would need to change?”
 
 3. Read the direct answer first.
 4. Open the supporting sections to see:
@@ -43,8 +43,13 @@ device.
 
 1. Choose **Upload files** to add text, Markdown, structured data, or a supported
    searchable document. You can also paste text directly.
-2. Or choose **GitHub repository** and paste a public repository URL. Leave the
-   version field blank unless you need a particular branch, release, or commit.
+2. Or choose **GitHub repository** and paste a public repository URL. Continuity
+   Lab looks for likely sources of truth—such as `STORY-CANON.md`, a story
+   bible, product contract, or decision record—and compares them with relevant
+   code and tests. In Vibe Code Simulator, this is how it found
+   `docs/STORY-CANON.md`. A filename or folder is a routing clue, not automatic
+   proof that a file is approved canon. Leave the version field blank unless
+   you need a particular branch, release, or commit.
 3. Ask a focused question. For example:
 
    - “Do these two character descriptions refer to the same person?”
@@ -55,6 +60,9 @@ device.
 4. Treat a missing answer honestly. If the source cannot be read, the relevant
    passage was not supplied, or two possible identities cannot be separated,
    Continuity Lab should say so rather than invent an answer.
+5. After you analyze your own files or repository, choose **Download my
+   results** to save the answer and its supporting receipt. The worked example
+   does not show a download control because it is not your project data.
 
 ### Use it from ChatGPT
 
@@ -222,11 +230,14 @@ the product:
   navigation, not automatic proof that an event is reachable.
 - `continuity_inspect_public_repository` is one current acquisition connector.
   It pins a public GitHub repository to one commit and returns a small safe set
-  of question-relevant excerpts. ChatGPT can then pass those excerpts into
-  `continuity_compile_material` for exact entity, conflict, or causal
-  inspection. Future authenticated repositories, document parsers, databases,
-  ledgers, and media-description adapters can feed the same compiler boundary
-  without changing the underlying truth model.
+  of question-relevant excerpts. Selection uses safe path and question clues to
+  look first for likely intent sources—story bibles, canon files, contracts,
+  decision records, and specifications—and then for relevant implementation
+  and tests. ChatGPT can pass those excerpts into `continuity_compile_material`
+  for exact entity, conflict, or causal inspection. These clues do not approve
+  a repository file as project canon. Future authenticated repositories,
+  document parsers, databases, ledgers, and media-description adapters can feed
+  the same compiler boundary without changing the underlying truth model.
 
 ### Ask about uploaded files or a repository
 
@@ -371,7 +382,7 @@ requires a trusted complete transition registry or reviewed adapter.
   GitHub App flow, or live working-tree mount.
 - **MCP:** an executable stateless `/api/mcp` hosted transport for five read-only
   tools, with `/mcp` retained for compatible direct-worker and local hosts:
-  three over `vcs-demo-r1`, one exact-span text-packet compiler, and one bounded
+  three over `vcs-demo-r2`, one exact-span text-packet compiler, and one bounded
   anonymous public-GitHub inspector. Authenticated persisted/private workspaces
   and resource handlers are not implemented.
 

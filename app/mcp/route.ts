@@ -14,6 +14,7 @@ import {
   VCS_DEMO_PROJECT_ID,
   VCS_DEMO_REVISION,
 } from "@/lib/continuity/demo";
+import { VCS_DEMO_TIME_SCOPE } from "@/lib/continuity/demo-questions";
 import { ContinuityEngine, ContinuityInputError } from "@/lib/continuity/engine";
 import { ConnectorExecutionBudget } from "@/lib/continuity/http/connector-execution";
 import { guardRequestBody, readJsonBodyBounded, RequestBodyError } from "@/lib/continuity/http/security";
@@ -74,7 +75,7 @@ const demoEngine = new ContinuityEngine(
 );
 
 const REVIEWED_COVERAGE = Object.freeze({
-  scope: "The complete reviewed VCS sample packet and configured transition registry at vcs-demo-r1.",
+  scope: `The complete reviewed Vibe Code Simulator example and configured transition registry at ${VCS_DEMO_REVISION}.`,
   complete: true,
   excludedSources: [] as string[],
 });
@@ -536,11 +537,11 @@ function queryForTool(name: ReviewedToolName, input: JsonObject): QueryRequest {
       question,
       analysisMode: targetClaimKeys.length ? "trace_dependencies" : "answer_question",
       timeScope: optionalTrimmedString(input.timeScope, 240)
-        ?? (targetClaimKeys.length ? "through the current VCS demonstration build" : null),
+        ?? (targetClaimKeys.length ? VCS_DEMO_TIME_SCOPE : null),
       ...(targetClaimKeys.length ? {
         temporalAxis: "day",
         storyPosition: 8,
-        targetPosition: 24,
+        targetPosition: 8,
       } : {}),
       contextRefs: cleanContextRefs(input.contextRefs),
       targetClaimKeys,
@@ -549,15 +550,17 @@ function queryForTool(name: ReviewedToolName, input: JsonObject): QueryRequest {
   if (name === "continuity_trace_dependencies") {
     const targetRef = (input.targetRef as string).trim();
     const question = `Trace dependencies for ${targetRef}`;
+    const explicitDay = targetRef.match(/\bday[\s_:#-]*(\d+(?:\.\d+)?)\b/i)?.[1];
+    const targetPosition = explicitDay ? Number(explicitDay) : 8;
     return {
       ...common,
       question,
       analysisMode: "trace_dependencies",
       timeScope: optionalTrimmedString(input.timeScope, 240)
-        ?? "through the current VCS demonstration build",
+        ?? VCS_DEMO_TIME_SCOPE,
       temporalAxis: "day",
       storyPosition: 8,
-      targetPosition: 24,
+      targetPosition,
       targetClaimKeys: demoTargetClaimKeys(question),
     };
   }
@@ -568,10 +571,10 @@ function queryForTool(name: ReviewedToolName, input: JsonObject): QueryRequest {
     question,
     proposedChange: change,
     analysisMode: "evaluate_change",
-    timeScope: "through the current VCS demonstration build",
+    timeScope: VCS_DEMO_TIME_SCOPE,
     temporalAxis: "day",
     storyPosition: 8,
-    targetPosition: 24,
+    targetPosition: 8,
     contextRefs: cleanContextRefs(input.contextRefs),
     targetClaimKeys: demoTargetClaimKeys(question, change),
   };
