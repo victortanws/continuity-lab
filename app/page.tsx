@@ -113,20 +113,20 @@ const REVIEWED_EXAMPLE_RECEIPT: AnalysisReceipt = {
 };
 
 const REVIEWED_EXAMPLE_ANSWER: UiAnswer = {
-  status: "NOT POSSIBLE YET",
+  status: "NOT REACHABLE IN THIS PROTOTYPE",
   tone: "danger",
-  headline: "The operation cannot happen in the current build.",
-  summary: "The story promises that the founder will pay $47,000 for Grandma's operation. The game can increase the player's cash, but it has no event that takes the payment, marks the operation as funded, and unlocks the later recovery scene.",
+  headline: "No. The current prototype cannot earn or pay the $47,000.",
+  summary: "The playable build covers only Days 7–8 and starts with $700. Its available income cannot reach $47,000 in that slice. The wider story plans to fund the operation later, after a Seed Round creates legitimate personal income for the Founder, but neither that progression nor the operation-payment action exists in the current game.",
   verdict: "UNREACHABLE",
   confidence: "high",
-  revision: "reviewed-game-build",
-  scope: "The current story plan, money rules, event list, and ending requirements",
+  revision: "current-prototype",
+  scope: "The current prototype contract, story canon, game code, and tests",
   coverageClosure: "closed",
   evidence: [
-    { evidenceId: "EV-VCS-NARRATIVE-CONTRACT", sourceId: "Story plan", locator: "Grandma operation goal", stance: "supports", supports: "The founder must pay $47,000 for Grandma's operation.", title: "Story plan" },
-    { evidenceId: "EV-VCS-ECONOMY", sourceId: "Economy rules", locator: "operation_cost and Day 24", stance: "context", supports: "The current balance uses a $47,000 target and a Day 24 deadline.", title: "Economy rules" },
-    { evidenceId: "EV-VCS-TRIGGER-REGISTRY", sourceId: "Game event list", locator: "operation completion events", stance: "opposes", supports: "No current event pays for the operation or records that it was funded.", title: "Game event list" },
-    { evidenceId: "EV-VCS-ENDING-CONTRACT", sourceId: "Ending requirements", locator: "post-operation scene", stance: "supports", supports: "The recovery scene expects a funded-operation result that the game never creates.", title: "Ending requirements" },
+    { evidenceId: "EV-VCS-NARRATIVE-CONTRACT", sourceId: "Story canon", locator: "Current playable slice", stance: "supports", supports: "The operation is a later-story obligation and is explicitly not reachable in the current Days 7–8 slice.", title: "Story canon" },
+    { evidenceId: "EV-VCS-ECONOMY", sourceId: "Prototype contract", locator: "Opening economy", stance: "supports", supports: "The two-day demonstration starts with $700 and its displayed income and costs are designed only for that short chapter.", title: "Prototype contract" },
+    { evidenceId: "EV-VCS-TRIGGER-REGISTRY", sourceId: "Current game and tests", locator: "Operation reachability", stance: "supports", supports: "The current build has no approved event that earns the required personal funds, pays the hospital, or records the operation as funded.", title: "Current game and tests" },
+    { evidenceId: "EV-VCS-ENDING-CONTRACT", sourceId: "Future-story plan", locator: "Seed Round and The Payment", stance: "context", supports: "The planned Seed Round cannot pay the bill directly from company cash. A later salary, disclosed secondary sale, dividend, or other approved source of personal funds must come first.", title: "Future-story plan" },
   ],
   entities: [
     { id: "FOUNDER", name: "The founder", type: "player character", aliases: ["protagonist"], resolution: "resolved", evidenceIds: ["EV-VCS-NARRATIVE-CONTRACT"] },
@@ -134,20 +134,20 @@ const REVIEWED_EXAMPLE_ANSWER: UiAnswer = {
     { id: "GOAL-OPERATION", name: "$47,000 operation", type: "story goal", aliases: ["operation payment"], resolution: "resolved", evidenceIds: ["EV-VCS-NARRATIVE-CONTRACT", "EV-VCS-ECONOMY"] },
   ],
   dependencies: [
-    { from: "The player earns enough money", to: "The game takes the $47,000 payment", claimKey: "operation-payment", claimKind: "game rule", relation: "must enable", status: "missing", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY"] },
-    { from: "The operation is marked as funded", to: "Grandma's recovery scene", claimKey: "operation-payoff", claimKind: "story requirement", relation: "must happen before", status: "blocked", evidenceIds: ["EV-VCS-ENDING-CONTRACT"] },
+    { from: "The Founder receives $47,000 in legitimate personal funds", to: "The Founder can pay the hospital", claimKey: "operation-payment", claimKind: "game rule", relation: "must happen first", status: "missing", evidenceIds: ["EV-VCS-TRIGGER-REGISTRY", "EV-VCS-ENDING-CONTRACT"] },
+    { from: "The hospital payment is recorded", to: "Grandma's recovery scene", claimKey: "operation-payoff", claimKind: "story requirement", relation: "must happen before", status: "blocked", evidenceIds: ["EV-VCS-ENDING-CONTRACT"] },
   ],
   conflicts: [],
   checks: [],
-  blockers: ["There is no one-time event that pays for the operation and saves the result."],
+  blockers: ["The playable build stops after Day 8. It starts with $700, and its current jobs and revenue cannot reach $47,000.", "Even if enough money were available, the build has no action that pays the hospital and records Grandma's operation as funded."],
   path: [],
   proposal: {
-    summary: "Add one clear payment event that connects the money system to the promised story outcome.",
-    assumptions: ["The player can reach the required balance by Day 24."],
-    requiredChanges: ["Add a one-time operation payment event.", "Remove $47,000 from the player's balance when the payment happens.", "Save an operation-funded result.", "Use that result to unlock Grandma's recovery scene.", "Add a test that proves the complete sequence works."],
-    downstreamRisks: ["The investment choice may leave too little money before Day 24.", "The ending can still fail if it checks a different result name."],
+    summary: "Build the missing later-story bridge from company growth to the Founder's legitimate personal funds, then add the actual operation payment.",
+    assumptions: ["The later story will implement the Seed Round and a lawful source of personal liquidity before the payment."],
+    requiredChanges: ["Implement the later Seed Round chapter and its requirements.", "Add an approved source of the Founder's personal funds, such as salary, a disclosed secondary sale, or a dividend.", "Add a one-time hospital payment action that uses those personal funds—not company cash.", "Save the operation-funded result and use it to unlock Grandma's recovery scene.", "Add a test that proves the complete sequence works and cannot charge twice."],
+    downstreamRisks: ["Marc's later Seed Round gives the company money; it does not automatically give the Founder personal money for Grandma's bill. The financing terms and the personal-liquidity event must remain separate.", "Grandma's recovery scene and pre-operation activity art must both use the same operation-funded result, or the story can show her as still waiting after payment."],
   },
-  followUps: ["Who does “Grandma” mean in the Day 8 customer message?", "What must happen before the investment offer appears?", "If the operation costs $60,000, what else must change?"],
+  followUps: ["Who does “Grandma” mean in the Day 8 customer message?", "What must happen before Marc's Seed Round offer appears?", "If the operation costs $60,000, what else must change?"],
   depth: "full",
 };
 
@@ -550,10 +550,9 @@ export default function Home() {
       <section className={`analysis-section ${hasAnalyzed ? "has-result" : ""}`} id="analysis">
         <div className="section-heading">
           <div><div className="eyebrow dark">ANSWER AND EXPLANATION</div><h2>{hasAnalyzed ? analyzedQuestion : "Your answer will appear here."}</h2></div>
-          <span className={`verdict ${answer.tone}`}><span/>{answer.status}</span>
+          <div className="section-heading-actions"><span className={`verdict ${answer.tone}`}><span/>{answer.status}</span>{canRunReviewedLive && <button className="live-test-icon" title="Run this exact question live" aria-label="Run this exact question live with the OpenAI API" onClick={() => void analyze(undefined, "live", analysisReceipt ?? undefined)} disabled={isAnalyzing}><Icon name="code" size={17}/></button>}</div>
         </div>
 
-        {engineMode === "demonstration" && <div className="honesty-banner"><strong>Reviewed example</strong><span>{canRunReviewedLive ? "This is the saved, human-reviewed answer. Use the icon to ask GPT-5.6 the same question when an API key is configured." : "This is a saved, human-reviewed answer from Vibe Code Simulator."}</span>{canRunReviewedLive && <button className="live-test-icon" aria-label="Run this exact question live with the OpenAI API" onClick={() => void analyze(undefined, "live", analysisReceipt ?? undefined)} disabled={isAnalyzing}><Icon name="code" size={17}/></button>}</div>}
         {engineMode === "unavailable" && <div className="honesty-banner attention"><strong>Live answer unavailable</strong><span>{analysisReceipt?.projectMode === "sample" ? "The reviewed answer is still available. Add the OpenAI API key in Site settings only if you want to run the same question through GPT-5.6." : "Your material is still stored. Add the OpenAI API key in Site settings to search it and answer with GPT-5.6."}</span></div>}
 
         <div className="answer-grid">
@@ -617,7 +616,7 @@ export default function Home() {
 }
 
 function SamplePanel({ onAsk }: { onAsk: (question?: string) => void }) {
-  return <div className="sample-panel"><div className="source-symbol coral"><Icon name="branch" size={23}/></div><div><span className="panel-kicker">WORKED EXAMPLE</span><h3>Vibe Code Simulator</h3><p>The founder needs $47,000 for his grandmother&apos;s operation by Day 24. The story promises this outcome, but the current game build is missing a step that makes it happen. Choose a question to see how Continuity Lab explains the problem.</p><div className="sample-question-list">{SUGGESTED_QUESTIONS.map((question) => <button key={question} onClick={() => onAsk(question)}>{question}<Icon name="arrow" size={14}/></button>)}</div></div><button className="outline-button" onClick={() => onAsk()}>Show the main answer <Icon name="arrow" size={16}/></button></div>;
+  return <div className="sample-panel"><div className="source-symbol coral"><Icon name="branch" size={23}/></div><div><span className="panel-kicker">WORKED EXAMPLE</span><h3>Vibe Code Simulator</h3><p>The full story promises that the Founder will eventually pay $47,000 for Grandma&apos;s operation. The playable prototype currently covers only Days 7–8, starts with $700, and cannot reach that outcome. Choose a question to see exactly where the implemented story stops and what a later chapter must add.</p><div className="sample-question-list">{SUGGESTED_QUESTIONS.map((question) => <button key={question} onClick={() => onAsk(question)}>{question}<Icon name="arrow" size={14}/></button>)}</div></div><button className="outline-button" onClick={() => onAsk()}>Show the main answer <Icon name="arrow" size={16}/></button></div>;
 }
 
 function UploadPanel({ sources, isUploading, documentType, setDocumentType, onChange, onPaste }: { sources: StoredSource[]; isUploading: boolean; documentType: UploadDocumentType; setDocumentType: (value: UploadDocumentType) => void; onChange: (event: ChangeEvent<HTMLInputElement>) => void; onPaste: (text: string) => Promise<boolean> }) {
@@ -635,7 +634,14 @@ function GitHubPanel({ repository, repositoryUrl, repositoryRef, setRepositoryUr
 }
 
 function McpPanel() {
-  return <div className="mcp-panel"><div><div className="source-symbol ink"><Icon name="code" size={23}/></div><span className="panel-kicker">USE IT FROM CHATGPT</span><h3>Ask questions without leaving your conversation.</h3><p>Connect this site as a ChatGPT app, attach or paste relevant material, and ask normally. The five read-only tools below can check exact quotations, keep similarly named people separate, show stated dependencies, and inspect a small public GitHub repository. This path does not require you to enter an OpenAI API key into Continuity Lab. Private repositories are not enabled yet.</p></div><div className="mcp-contract"><span>KEYLESS · READ-ONLY · CONTINUITY.MCP.V1</span><code>continuity_answer_question(question)</code><code>continuity_trace_dependencies(target)</code><code>continuity_analyze_change(proposal)</code><code>continuity_compile_material(documents, claims, relations?)</code><code>continuity_inspect_public_repository(url, question)</code><small>Connect this host’s /api/mcp endpoint · router v3.3 is separate metadata · the original v3.2 tool contracts remain compatible.</small></div></div>;
+  const endpoint = "https://continuity-lab-vcs.synthesys.chatgpt.site/api/mcp";
+  const [copied, setCopied] = useState(false);
+  async function copyEndpoint() {
+    await navigator.clipboard.writeText(endpoint);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+  return <div className="mcp-panel"><div><div className="source-symbol ink"><Icon name="code" size={23}/></div><span className="panel-kicker">CONNECT TO CHATGPT</span><h3>Use Continuity Lab inside a ChatGPT conversation.</h3><p>ChatGPT can call the same read-only tools while you talk. You can ask about the built-in example, pass text from an attachment, or give it a public GitHub repository to inspect.</p><div className="connection-status"><strong>Private preview</strong><p>The MCP server is implemented, but this site currently allows only its owner. ChatGPT cannot complete its server-to-server connection until the endpoint is made publicly reachable or protected with supported app authentication.</p></div></div><div className="connect-guide"><span className="panel-kicker">ONCE PUBLIC ACCESS OR AUTH IS ENABLED</span><ol><li><span>1</span><p>In ChatGPT, open <b>Settings → Security and login</b> and turn on <b>Developer mode</b>.</p></li><li><span>2</span><p>Open <b>Settings → Plugins</b>, press <b>+</b>, and create a developer-mode app named Continuity Lab.</p></li><li><span>3</span><p>Paste the MCP address below. After ChatGPT lists the five tools, press <b>Create</b>.</p></li><li><span>4</span><p>Start a new chat, choose <b>+ → More → Continuity Lab</b>, then ask a question normally.</p></li></ol><div className="mcp-endpoint"><span>MCP ADDRESS</span><code>{endpoint}</code><button type="button" onClick={() => void copyEndpoint()}>{copied ? "Copied" : "Copy address"}</button></div><div className="mcp-actions"><a href="https://chatgpt.com/plugins" target="_blank" rel="noreferrer">Open ChatGPT Plugins <Icon name="arrow" size={14}/></a><a href="https://developers.openai.com/apps-sdk/deploy/connect-chatgpt" target="_blank" rel="noreferrer">Official connection guide <Icon name="arrow" size={14}/></a></div></div></div>;
 }
 
 function DependencyView({ dependencies, path }: { dependencies: DependencyEdge[]; path: string[] }) {
@@ -650,7 +656,7 @@ function EmptyState({ copy }: { copy: string }) {
 
 function engineLabel(mode: EngineMode, projectMode: ProjectMode) {
   if (mode === "gpt-5.6-sol") return "GPT-5.6 Sol · live reasoning";
-  if (mode === "demonstration") return "Reviewed example";
+  if (mode === "demonstration") return "Vibe Code Simulator example";
   if (mode === "unavailable") return "Live reasoning needs setup";
   return projectMode === "sample" ? "Example ready" : "Your files selected";
 }

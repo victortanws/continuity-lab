@@ -24,9 +24,11 @@ test("server-renders the Continuity Lab MVP", async () => {
   assert.match(html, /How it works/);
   assert.match(html, /Show the example/);
   assert.match(html, /Vibe Code Simulator/);
-  assert.match(html, /The operation cannot happen in the current build/);
+  assert.match(html, /No\. The current prototype cannot earn or pay the \$47,000/);
   assert.match(html, /What the question refers to/);
   assert.match(html, /Switch to dark mode/);
+  assert.match(html, /Marc&#x27;s later Seed Round gives the company money/);
+  assert.doesNotMatch(html, /Reviewed example/);
   assert.doesNotMatch(html, /Try the VCS sample/);
   assert.doesNotMatch(html, /graph hairball/);
   assert.doesNotMatch(html, /causal edges/i);

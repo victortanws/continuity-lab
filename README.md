@@ -9,17 +9,18 @@ next, whether two sources disagree, or what else must change if you revise part
 of the project. Continuity Lab gives a plain-language answer, shows the sources
 behind it, and keeps suggestions separate from established facts.
 
-The worked example uses **Vibe Code Simulator**. Its founder must pay $47,000
-for his grandmother's operation by Day 24. The story promises that outcome, but
-the current game build is missing the event that takes the payment, records the
-result, and unlocks the later recovery scene. Continuity Lab finds that missing
-link and turns it into a concrete development plan.
+The worked example uses **Vibe Code Simulator**. Its founder eventually needs
+to pay $47,000 for his grandmother's operation. The current prototype covers
+only Days 7–8, starts the player with $700, and cannot earn enough during that
+slice. It also lacks the hospital-payment action and saved result that would
+unlock the later recovery scene. Continuity Lab separates those two problems
+and turns them into a concrete development plan.
 
 ## Quick start guide
 
 ### Try the worked example
 
-1. Open the site. The reviewed Vibe Code Simulator answer is already visible.
+1. Open the site. The Vibe Code Simulator example is already visible.
 2. Choose one of the example questions, such as:
 
    - “Can the player actually save Grandma by Day 24?”
@@ -57,13 +58,25 @@ device.
 
 ### Use it from ChatGPT
 
-The hosted site exposes a read-only MCP endpoint at
-`https://<host>/api/mcp`. Connect it as a ChatGPT app, select Continuity
-Lab in the conversation, attach or paste the relevant material, and ask your
-question normally. The MCP path lets ChatGPT provide the conversation while
-Continuity Lab checks quotations, identities, disagreements, and stated
-relationships. This keyless path does not require the user to enter an OpenAI
-API key into Continuity Lab.
+The MCP server exists, but the hosted site is currently an owner-only private
+preview. That access setting prevents ChatGPT from reaching the endpoint from
+its own servers. Do not expect the connection to complete until the site is
+made public or a supported authentication flow is added.
+
+Once one of those access paths is enabled:
+
+1. In ChatGPT, open **Settings → Security and login** and turn on
+   **Developer mode**.
+2. Open **Settings → Plugins**, press **+**, and create a developer-mode app.
+3. Use the name **Continuity Lab** and paste this MCP address:
+   `https://continuity-lab-vcs.synthesys.chatgpt.site/api/mcp`.
+4. Start a new chat, choose **+ → More → Continuity Lab**, then ask a question
+   normally.
+
+The MCP path lets ChatGPT provide the conversation while Continuity Lab checks
+quotations, identities, disagreements, and stated relationships. It does not
+ask the user to paste an OpenAI API key into Continuity Lab. These steps follow
+the current [OpenAI Apps SDK connection guide](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt).
 
 ## Useful terminology
 
