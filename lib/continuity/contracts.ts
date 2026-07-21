@@ -4,7 +4,7 @@ export const CONTINUITY_ANSWER_VERSION = "continuity.answer.v7" as const;
  * MCP contract. Keep this separate from `CONTINUITY_ANSWER_VERSION`: v3.4 is
  * a proof-contract/routing upgrade, not a wire-format reset.
  */
-export const AUTHORITY_ROUTER_VERSION = "3.4.0" as const;
+export const AUTHORITY_ROUTER_VERSION = "3.5.0" as const;
 
 export type CanonAuthority =
   | "immutable"

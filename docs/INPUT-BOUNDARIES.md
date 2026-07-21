@@ -69,7 +69,10 @@ dates, SemVer, ranges, and domain-specific orderings require a trusted adapter;
 the compiler does not turn unverified numbers into temporal graph edges.
 
 `continuity_inspect_public_repository` permits one canonical public GitHub
-repository and optional ref. The handler resolves a full commit, examines no
+repository, optional ref, and optional `projectScope` ID or safe relative
+subtree. The handler resolves a full commit, discovers independent project
+roots and declared evidence domains, and returns no excerpts when a generic
+question remains ambiguous. After scope selection it examines no
 more than 1,000 tree entries, makes at most eight provider calls, reads at most
 six safe text files and 384 KiB, returns at most 20 KiB of excerpts, and ends at
 20 seconds without retry. It never accepts a GitHub token. A client must pass

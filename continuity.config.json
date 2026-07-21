@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "projectScopes": [
+    {
+      "id": "continuity-lab",
+      "label": "Continuity Lab product",
+      "root": ".",
+      "kind": "product",
+      "exclude": [
+        "lib/continuity/demo.ts",
+        "lib/continuity/demo-questions.ts",
+        "public/art/vcs-*"
+      ]
+    },
+    {
+      "id": "vcs-demo",
+      "label": "Vibe Code Simulator reviewed example",
+      "root": ".",
+      "kind": "example",
+      "include": [
+        "README.md",
+        "app/page.tsx",
+        "lib/continuity/demo.ts",
+        "lib/continuity/demo-questions.ts",
+        "public/art/vcs-*"
+      ]
+    }
+  ],
+  "sourceRoutes": [
+    {
+      "pattern": "docs/**",
+      "authority": "reference"
+    },
+    {
+      "pattern": "lib/**",
+      "authority": "production"
+    },
+    {
+      "pattern": "app/**",
+      "authority": "production"
+    },
+    {
+      "pattern": "tests/**",
+      "authority": "production"
+    }
+  ]
+}

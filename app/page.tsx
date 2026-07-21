@@ -97,7 +97,15 @@ type RepositoryState = {
   commit: string;
   fileCount?: number;
   capability?: string;
+  projectScope?: string;
   message: string;
+};
+
+type RepositoryScopeChoice = {
+  id: string;
+  label: string;
+  rootPath: string;
+  kind: string;
 };
 
 const SAMPLE_PROJECT_ID = "vcs-demo";
@@ -216,6 +224,8 @@ export default function Home() {
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [repositoryRef, setRepositoryRef] = useState("");
   const [repository, setRepository] = useState<RepositoryState>(EMPTY_REPOSITORY);
+  const [repositoryScope, setRepositoryScope] = useState("");
+  const [repositoryScopeChoices, setRepositoryScopeChoices] = useState<RepositoryScopeChoice[]>([]);
   const [toast, setToast] = useState("");
   const [showFullTrace, setShowFullTrace] = useState(false);
   const [theme, setTheme] = useState<Theme>("light");
@@ -431,12 +441,41 @@ export default function Home() {
       const response = await fetch("/api/continuity/repositories", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: WORKSPACE_PROJECT_ID, repository: requestedRepository, ref: repositoryRef.trim() || undefined }),
+        body: JSON.stringify({
+          projectId: WORKSPACE_PROJECT_ID,
+          repository: requestedRepository,
+          ref: repositoryRef.trim() || undefined,
+          projectScope: repositoryScope || undefined,
+        }),
       });
       const payload = await response.json() as Record<string, unknown>;
+      if (!response.ok && payload.code === "project_scope_required") {
+        const choices = arrayOfRecords(payload.scopes).flatMap((item): RepositoryScopeChoice[] => {
+          const id = stringValue(item.id, "");
+          if (!id) return [];
+          return [{
+            id,
+            label: stringValue(item.label, id),
+            rootPath: stringValue(item.rootPath, "."),
+            kind: stringValue(item.kind, "project"),
+          }];
+        });
+        setRepositoryScopeChoices(choices);
+        setRepositoryScope(choices[0]?.id ?? "");
+        setRepository({
+          phase: "attention",
+          repository: requestedRepository,
+          ref: repositoryRef.trim() || "Default branch",
+          commit: stringValue(payload.commitSha, "Nothing saved"),
+          message: readMessage(payload) ?? "Choose which project you want Continuity Lab to read.",
+        });
+        setProjectMode("workspace");
+        return;
+      }
       if (!response.ok) throw new Error(readMessage(payload) ?? "The repository could not be synchronized.");
       const next = presentRepository(payload);
       if (next) setRepository(next);
+      setRepositoryScopeChoices([]);
       setProjectMode("workspace");
       showToast("Repository connected");
     } catch (error) {
@@ -549,7 +588,17 @@ export default function Home() {
               <UploadPanel sources={sources} isUploading={isUploading} documentType={uploadDocumentType} setDocumentType={setUploadDocumentType} onChange={addSource} onPaste={addPastedSource}/>
             )}
             {sourcePanel === "github" && (
-              <GitHubPanel repository={repository} repositoryUrl={repositoryUrl} repositoryRef={repositoryRef} setRepositoryUrl={setRepositoryUrl} setRepositoryRef={setRepositoryRef} onSubmit={syncRepository}/>
+              <GitHubPanel
+                repository={repository}
+                repositoryUrl={repositoryUrl}
+                repositoryRef={repositoryRef}
+                repositoryScope={repositoryScope}
+                repositoryScopeChoices={repositoryScopeChoices}
+                setRepositoryUrl={(value) => { setRepositoryUrl(value); setRepositoryScope(""); setRepositoryScopeChoices([]); }}
+                setRepositoryRef={(value) => { setRepositoryRef(value); setRepositoryScope(""); setRepositoryScopeChoices([]); }}
+                setRepositoryScope={setRepositoryScope}
+                onSubmit={syncRepository}
+              />
             )}
             {sourcePanel === "mcp" && <McpPanel/>}
           </div>
@@ -645,8 +694,35 @@ function UploadPanel({ sources, isUploading, documentType, setDocumentType, onCh
   return <div className="upload-panel"><div className="upload-input-column"><label className="upload-classifier"><span>How should this document be read?</span><select value={documentType} disabled={isUploading} onChange={(event) => setDocumentType(event.target.value as UploadDocumentType)}><option value="narrative">Story or source text</option><option value="reference">Reference material</option><option value="proposal">Draft or proposal</option></select><small>{typeExplanation}</small></label><label className="upload-drop"><input type="file" multiple accept=".txt,.md,.markdown,.json,.yaml,.yml,.xml,.csv,.tsv,.pdf,.doc,.docx,.html,.htm,.pptx" onChange={(event) => void onChange(event)}/><span className="source-symbol blue"><Icon name="upload" size={23}/></span><strong>{isUploading ? "Storing and indexing…" : "Upload up to 12 sources"}</strong><p>TXT, Markdown, JSON, YAML, XML, CSV/TSV, HTML · operator preview: searchable PDF, DOC/DOCX, PPTX · 20 MB each</p><small>PDF/Office upload is allowlisted because its contents are not yet credential-scanned. XLSX, images, scanned/OCR-only PDFs, EPUB, and RTF need a dedicated extractor.</small></label><div className="paste-source"><textarea value={pastedText} onChange={(event) => setPastedText(event.target.value)} placeholder="Or paste a story, summary, cast list, ID table, or notes…"/><button type="button" disabled={isUploading || !pastedText.trim()} onClick={() => void onPaste(pastedText).then((stored) => { if (stored) setPastedText(""); })}>Store pasted text</button></div></div><div className="uploaded-list"><div className="panel-heading"><span>WORKSPACE SOURCES</span><strong>{sources.length}</strong></div>{sources.length ? sources.slice(0, 5).map((source) => <div key={source.id} title={source.indexError || "Provider indexing does not independently verify complete extraction."}><Icon name="file" size={17}/><span><strong>{source.logicalName || source.originalFilename || source.filename}</strong><small>{formatBytes(source.byteSize)} · {source.documentType} · {source.authority} · {(source.extractionStatus ?? "not_yet_verified").replaceAll("_", " ")}</small></span><em className={source.indexStatus}>{source.indexStatus.replaceAll("_", " ")}</em></div>) : <EmptyState copy="Each source will show storage/index status. Indexed means searchable by the provider; it does not prove that every page or entity was extracted."/>}</div></div>;
 }
 
-function GitHubPanel({ repository, repositoryUrl, repositoryRef, setRepositoryUrl, setRepositoryRef, onSubmit }: { repository: RepositoryState; repositoryUrl: string; repositoryRef: string; setRepositoryUrl: (value: string) => void; setRepositoryRef: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <div className="github-panel"><form onSubmit={(event) => void onSubmit(event)}><div className="panel-kicker">CONNECT GITHUB</div><h3>Find the project&apos;s source of truth.</h3><p>Paste a public repository. Continuity Lab looks for likely sources of truth—such as <code>STORY-CANON.md</code>, a story bible, product contract, or decision record—and compares them with relevant code and tests. That is how it found <code>docs/STORY-CANON.md</code> in Vibe Code Simulator. A filename is a clue, not automatic proof that a file is approved canon.</p><p>We save the exact version you choose, so later changes cannot silently rewrite an old answer. Leave the version blank to use the current default branch.</p><label><span>Public repository URL</span><input type="url" placeholder="https://github.com/your-team/your-game" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} required/></label><label><span>Version to use <i>optional</i></span><input aria-describedby="repository-version-hint" placeholder="Current default branch" value={repositoryRef} onChange={(event) => setRepositoryRef(event.target.value)}/><small id="repository-version-hint">A branch, release tag, or commit ID</small></label><button className="dark-button" disabled={repository.phase === "syncing" || !repositoryUrl.trim()}>{repository.phase === "syncing" ? <span className="spinner light"/> : <Icon name="branch" size={17}/>} {repository.phase === "syncing" ? "Connecting…" : "Add repository"}</button></form><div className={`repo-receipt ${repository.phase}`}><div className="receipt-head"><span/><strong>{repository.phase === "ready" ? "Repository ready" : repository.phase === "syncing" ? "Connecting repository" : repository.phase === "attention" ? "Needs attention" : "Ready to connect"}</strong></div><dl><div><dt>Repository</dt><dd>{shortRepository(repository.repository)}</dd></div><div><dt>Version</dt><dd>{repository.ref}</dd></div><div><dt>Saved copy</dt><dd>{shortCommit(repository.commit)}</dd></div>{typeof repository.fileCount === "number" && <div><dt>Files available</dt><dd>{repository.fileCount}</dd></div>}<div><dt>Access</dt><dd>{repository.capability ? repository.capability.replaceAll("_", " ") : "not connected"}</dd></div></dl><p>{repository.message}</p></div></div>;
+function GitHubPanel({ repository, repositoryUrl, repositoryRef, repositoryScope, repositoryScopeChoices, setRepositoryUrl, setRepositoryRef, setRepositoryScope, onSubmit }: {
+  repository: RepositoryState;
+  repositoryUrl: string;
+  repositoryRef: string;
+  repositoryScope: string;
+  repositoryScopeChoices: RepositoryScopeChoice[];
+  setRepositoryUrl: (value: string) => void;
+  setRepositoryRef: (value: string) => void;
+  setRepositoryScope: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const needsScope = repositoryScopeChoices.length > 0;
+  return <div className="github-panel">
+    <form onSubmit={(event) => void onSubmit(event)}>
+      <div className="panel-kicker">CONNECT GITHUB</div>
+      <h3>Find the project&apos;s source of truth.</h3>
+      <p>Paste a public repository. Continuity Lab looks for likely sources of truth—such as <code>STORY-CANON.md</code>, a story bible, product contract, or decision record—and compares them with relevant code and tests. In the Vibe Code Simulator example, this process found <code>docs/STORY-CANON.md</code>. A filename is a clue, not automatic proof that a file is approved canon.</p>
+      <p>If the repository contains more than one product, story, or example, we stop and ask which one you mean. We save that project choice with the exact version, so later questions cannot silently mix material from a neighboring project.</p>
+      <label><span>Public repository URL</span><input type="url" placeholder="https://github.com/your-team/your-game" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} required/></label>
+      <label><span>Version to use <i>optional</i></span><input aria-describedby="repository-version-hint" placeholder="Current default branch" value={repositoryRef} onChange={(event) => setRepositoryRef(event.target.value)}/><small id="repository-version-hint">A branch, release tag, or commit ID</small></label>
+      {needsScope && <label className="repository-scope-choice"><span>Which project do you mean?</span><select value={repositoryScope} onChange={(event) => setRepositoryScope(event.target.value)}>{repositoryScopeChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label} · {choice.rootPath}</option>)}</select><small>Only files inside this project boundary will be saved for questions.</small></label>}
+      <button className="dark-button" disabled={repository.phase === "syncing" || !repositoryUrl.trim() || (needsScope && !repositoryScope)}>{repository.phase === "syncing" ? <span className="spinner light"/> : <Icon name="branch" size={17}/>} {repository.phase === "syncing" ? "Connecting…" : needsScope ? "Add selected project" : "Add repository"}</button>
+    </form>
+    <div className={`repo-receipt ${repository.phase}`}>
+      <div className="receipt-head"><span/><strong>{repository.phase === "ready" ? "Repository ready" : repository.phase === "syncing" ? "Connecting repository" : repository.phase === "attention" ? "Needs attention" : "Ready to connect"}</strong></div>
+      <dl><div><dt>Repository</dt><dd>{shortRepository(repository.repository)}</dd></div><div><dt>Version</dt><dd>{repository.ref}</dd></div>{repository.projectScope && <div><dt>Project</dt><dd>{repository.projectScope}</dd></div>}<div><dt>Saved copy</dt><dd>{shortCommit(repository.commit)}</dd></div>{typeof repository.fileCount === "number" && <div><dt>Files available</dt><dd>{repository.fileCount}</dd></div>}<div><dt>Access</dt><dd>{repository.capability ? repository.capability.replaceAll("_", " ") : "not connected"}</dd></div></dl>
+      <p>{repository.message}</p>
+    </div>
+  </div>;
 }
 
 function McpPanel() {
@@ -822,9 +898,15 @@ function presentRepository(payload: Record<string, unknown>): RepositoryState | 
   ].filter(Boolean) as Record<string, unknown>[];
   const rawStatus = firstString(statusRecords, ["indexStatus", "status", "syncStatus"])?.toLowerCase() ?? "ready";
   const phase: RepositoryState["phase"] = rawStatus.includes("fail") || rawStatus.includes("error") ? "attention" : rawStatus.includes("indexing") || rawStatus.includes("pending") || rawStatus.includes("sync") ? "syncing" : "ready";
+  const scopeRecords = [
+    asRecord(payload.projectScope),
+    asRecord(asRecord(payload.snapshot)?.projectScope),
+    newest ? asRecord(asRecord(newest.snapshot)?.projectScope) : null,
+  ].filter(Boolean) as Record<string, unknown>[];
   return {
     phase, repository: repository ?? "Connected repository", ref: firstString(records, ["requestedRef", "ref", "branch", "tag"]) ?? "Default branch", commit: commit ?? "Pinned snapshot",
     fileCount: firstNumber(records, ["fileCount", "selectedFileCount", "entries"]), capability: firstString(records, ["capability", "indexStatus"]),
+    projectScope: firstString(scopeRecords, ["label", "id"]),
     message: readMessage(payload) ?? (phase === "syncing" ? "The selected files are saved and are being prepared for questions." : "This exact repository version is ready for questions."),
   };
 }

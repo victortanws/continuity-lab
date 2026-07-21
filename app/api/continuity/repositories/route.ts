@@ -29,6 +29,14 @@ import {
   parseRepositoryAuthorityRoutes,
 } from "@/lib/continuity/repositories/authority";
 import {
+  discoverRepositoryProjectScopes,
+  findRepositoryScopeConfigEntry,
+  parseDeclaredRepositoryProjectScopes,
+  repositoryEntryBelongsToScope,
+  resolveRepositoryProjectScope,
+  type RepositoryProjectScope,
+} from "@/lib/continuity/repositories/project-boundary";
+import {
   isLocalRequest,
   projectAuthenticationRequired,
   projectMutationForbidden,
@@ -165,11 +173,15 @@ export async function POST(request: Request) {
   const requestedProjectId = typeof payload.projectId === "string" ? payload.projectId.trim() : "";
   const repositoryInput = typeof payload.repository === "string" ? payload.repository.trim() : "";
   const requestedRef = typeof payload.ref === "string" ? payload.ref.trim().slice(0, 200) || "HEAD" : "HEAD";
+  const requestedRepositoryScope = typeof payload.projectScope === "string" ? payload.projectScope.trim() : "";
   if (!PROJECT_ID_PATTERN.test(requestedProjectId)) {
     return Response.json({ error: "A valid projectId is required." }, { status: 400 });
   }
   if (!repositoryInput || repositoryInput.length > 300) {
     return Response.json({ error: "A GitHub repository URL is required." }, { status: 400 });
+  }
+  if (requestedRepositoryScope.length > 240) {
+    return Response.json({ error: "projectScope must be no longer than 240 characters." }, { status: 400 });
   }
   const scope = await resolveProjectScope(request, requestedProjectId, requestIdentityTrust);
   if (!scope) return projectAuthenticationRequired();
@@ -205,6 +217,38 @@ export async function POST(request: Request) {
     if (!actorUsage.allowed) return rateLimitResponse(actorUsage.retryAfterSeconds);
     const globalUsage = await repository.consumeUsage("global:github", "repository_sync", 100, 24 * 60 * 60);
     if (!globalUsage.allowed) return rateLimitResponse(globalUsage.retryAfterSeconds);
+    const provider = new GitHubRepositoryProvider({
+      token: bindings.GITHUB_TOKEN,
+      timeoutMs: 12_000,
+      executionBudget,
+    });
+    const revision = await provider.resolveRevision(reference, requestedRef);
+
+    const tree = await provider.listTree(reference, revision);
+    const declaredScopes = await readDeclaredProjectScopes(provider, reference, tree.entries, limits.maxFileBytes);
+    const scopeCandidates = discoverRepositoryProjectScopes(tree.entries, declaredScopes, reference.fullName);
+    const projectScopeResolution = resolveRepositoryProjectScope(
+      tree.entries,
+      scopeCandidates,
+      "",
+      requestedRepositoryScope || null,
+    );
+    if (projectScopeResolution.status !== "resolved" || !projectScopeResolution.selected) {
+      return Response.json({
+        error: projectScopeResolution.status === "ambiguous"
+          ? "This repository contains more than one project. Choose which project you want Continuity Lab to read."
+          : "The requested project was not found in this repository version.",
+        code: projectScopeResolution.status === "ambiguous" ? "project_scope_required" : "project_scope_not_found",
+        requestedRef: revision.requestedRef,
+        commitSha: revision.commitSha,
+        projectScope: requestedRepositoryScope || null,
+        scopes: projectScopeResolution.candidates.map(publicProjectScope),
+      }, { status: projectScopeResolution.status === "ambiguous" ? 409 : 400 });
+    }
+    const selectedProjectScope = projectScopeResolution.selected;
+    const snapshotPolicyVersion = scopedPolicyVersion(selectedProjectScope.id);
+    const scopedEntries = tree.entries.filter((entry) => repositoryEntryBelongsToScope(entry, selectedProjectScope));
+
     const project = await repository.ensureProject(projectId, "Continuity Lab project");
     connection = await repository.ensureRepositoryConnection({
       projectId,
@@ -215,23 +259,10 @@ export async function POST(request: Request) {
       requestedRef,
     });
 
-    const provider = new GitHubRepositoryProvider({
-      token: bindings.GITHUB_TOKEN,
-      timeoutMs: 12_000,
-      executionBudget,
-    });
-    let revision;
-    try {
-      revision = await provider.resolveRevision(reference, requestedRef);
-    } catch (error) {
-      await repository.failRepositoryConnection(connection.id, publicError(error));
-      throw error;
-    }
-
     const existing = await repository.findRepositorySnapshot(
       connection.id,
       revision.commitSha,
-      REPOSITORY_POLICY_VERSION,
+      snapshotPolicyVersion,
     );
     if (existing?.status === "ready") {
       const indexing = await ensureExistingSnapshotIndex({
@@ -248,7 +279,7 @@ export async function POST(request: Request) {
         reference.owner,
         reference.name,
       ) ?? connection;
-      return Response.json({ ...responsePayload(connection, existing, indexing, true), projectRevision });
+      return Response.json({ ...responsePayload(connection, existing, indexing, true, selectedProjectScope), projectRevision });
     }
 
     snapshot = await repository.prepareRepositorySnapshot({
@@ -257,11 +288,10 @@ export async function POST(request: Request) {
       commitSha: revision.commitSha,
       treeSha: revision.treeSha,
       requestedRef: revision.requestedRef,
-      policyVersion: REPOSITORY_POLICY_VERSION,
+      policyVersion: snapshotPolicyVersion,
     });
 
-    const tree = await provider.listTree(reference, revision);
-    const selection = selectRepositoryEntries(tree.entries, limits);
+    const selection = selectRepositoryEntries(scopedEntries, limits);
     if (!selection.selected.length) {
       throw new RepositoryProviderError(
         "No supported, non-sensitive text files were found within the snapshot limits.",
@@ -302,6 +332,8 @@ export async function POST(request: Request) {
       selection,
       invalidTextPaths: processingOmissions,
       files: fetched,
+      projectScope: selectedProjectScope,
+      policyVersion: snapshotPolicyVersion,
     });
     const packetBytes = new TextEncoder().encode(packetText);
     const packetSha256 = await sha256Hex(packetBytes);
@@ -323,9 +355,10 @@ export async function POST(request: Request) {
       fetched.map((item) => ({ path: item.entry.path, text: item.text })),
     );
     const manifest = {
-      version: "continuity.repository-snapshot.v1",
-      policyVersion: REPOSITORY_POLICY_VERSION,
+      version: "continuity.repository-snapshot.v2",
+      policyVersion: snapshotPolicyVersion,
       projectId,
+      projectScope: publicProjectScope(selectedProjectScope),
       snapshotId: snapshot.id,
       connectionId: connection.id,
       repository: reference,
@@ -393,7 +426,7 @@ export async function POST(request: Request) {
       reference.name,
     ) ?? connection;
     return Response.json({
-      ...responsePayload(connection, promoted, indexing, false),
+      ...responsePayload(connection, promoted, indexing, false, selectedProjectScope),
       projectRevision,
     }, { status: 201 });
   } catch (error) {
@@ -540,6 +573,8 @@ export function buildRepositoryPacket(input: {
   selection: RepositorySelection;
   invalidTextPaths: Array<{ path: string; reason: string }>;
   files: FetchedEntry[];
+  projectScope?: RepositoryProjectScope;
+  policyVersion?: string;
 }): string {
   const coverageComplete = input.selection.coverage.complete && !input.treeTruncated && input.invalidTextPaths.length === 0;
   const authorityRoutes = parseRepositoryAuthorityRoutes(
@@ -554,7 +589,11 @@ export function buildRepositoryPacket(input: {
     `Commit SHA: ${input.revision.commitSha}`,
     `Tree SHA: ${input.revision.treeSha}`,
     `Committed at: ${input.revision.committedAt ?? "unknown"}`,
-    `Policy: ${REPOSITORY_POLICY_VERSION}`,
+    `Policy: ${input.policyVersion ?? REPOSITORY_POLICY_VERSION}`,
+    ...(input.projectScope ? [
+      `Project scope: ${input.projectScope.label} (${input.projectScope.id})`,
+      `Project root: ${input.projectScope.rootPath}`,
+    ] : []),
     `Coverage complete: ${coverageComplete ? "yes" : "no"}`,
     `Selected files: ${input.files.length}`,
     `Omitted entries: ${input.selection.skipped.length + input.invalidTextPaths.length}`,
@@ -718,6 +757,7 @@ function responsePayload(
   snapshot: StoredRepositorySnapshot,
   indexing: { capability: string; status: string; error?: string; errorCode?: string },
   deduplicated: boolean,
+  projectScope?: RepositoryProjectScope,
 ) {
   return {
     status: indexing.status,
@@ -728,6 +768,7 @@ function responsePayload(
     ...(indexing.errorCode ? { indexErrorCode: indexing.errorCode } : {}),
     connection: publicConnection(connection),
     snapshot: publicSnapshot(snapshot),
+    ...(projectScope ? { projectScope: publicProjectScope(projectScope) } : {}),
     message: indexing.status === "indexed"
       ? "The commit-pinned repository snapshot is searchable by GPT-5.6."
       : indexing.status === "indexing"
@@ -735,6 +776,48 @@ function responsePayload(
         : indexing.status === "failed"
           ? "The repository snapshot is safely stored, but its search index needs attention."
           : "The repository snapshot is safely stored. Add the OpenAI API key to make it searchable by GPT-5.6.",
+  };
+}
+
+async function readDeclaredProjectScopes(
+  provider: GitHubRepositoryProvider,
+  reference: ReturnType<typeof parseGitHubRepository>,
+  entries: RepositoryTreeEntry[],
+  maxFileBytes: number,
+): Promise<RepositoryProjectScope[]> {
+  const entry = findRepositoryScopeConfigEntry(entries);
+  if (
+    !entry || entry.mode === "120000" || entry.size === null
+    || !Number.isSafeInteger(entry.size) || entry.size <= 0
+    || entry.size > Math.min(maxFileBytes, 128 * 1024)
+  ) return [];
+  try {
+    const blob = await provider.readBlob(reference, entry);
+    if (
+      !(blob.bytes instanceof Uint8Array)
+      || blob.byteSize !== blob.bytes.byteLength
+      || blob.byteSize !== entry.size
+      || blob.providerHash.toLowerCase() !== entry.sha.toLowerCase()
+    ) return [];
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(blob.bytes);
+    if (scanRepositoryTextForSecrets(text).detected) return [];
+    return parseDeclaredRepositoryProjectScopes(text);
+  } catch {
+    return [];
+  }
+}
+
+function scopedPolicyVersion(scopeId: string): string {
+  return `${REPOSITORY_POLICY_VERSION}:scope:${scopeId}`;
+}
+
+function publicProjectScope(scope: RepositoryProjectScope) {
+  return {
+    id: scope.id,
+    label: scope.label,
+    rootPath: scope.rootPath,
+    kind: scope.kind,
+    origin: scope.origin,
   };
 }
 
@@ -753,6 +836,7 @@ function publicConnection(connection: StoredRepositoryConnection) {
 
 function publicSnapshot(snapshot: StoredRepositorySnapshot | null) {
   if (!snapshot) return null;
+  const projectScopeId = scopeIdFromPolicyVersion(snapshot.policyVersion);
   return {
     id: snapshot.id,
     commitSha: snapshot.commitSha,
@@ -765,11 +849,18 @@ function publicSnapshot(snapshot: StoredRepositorySnapshot | null) {
     skippedFileCount: snapshot.skippedFileCount,
     totalBytes: snapshot.totalBytes,
     policyVersion: snapshot.policyVersion,
+    ...(projectScopeId ? { projectScope: { id: projectScopeId } } : {}),
     indexStatus: snapshot.indexStatus,
     indexError: snapshot.indexError,
     createdAt: snapshot.createdAt,
     completedAt: snapshot.completedAt,
   };
+}
+
+function scopeIdFromPolicyVersion(policyVersion: string): string | null {
+  const marker = ":scope:";
+  const offset = policyVersion.indexOf(marker);
+  return offset >= 0 ? policyVersion.slice(offset + marker.length) || null : null;
 }
 
 function requestError(error: unknown): Response {

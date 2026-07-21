@@ -1,5 +1,21 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "projectScopes": [
+    {
+      "id": "game",
+      "label": "The game",
+      "root": ".",
+      "kind": "product",
+      "exclude": ["examples/**"]
+    },
+    {
+      "id": "tutorial-example",
+      "label": "Tutorial example",
+      "root": ".",
+      "kind": "example",
+      "include": ["examples/tutorial/**"]
+    }
+  ],
   "sourceRoutes": [
     {
       "pattern": "docs/PROTOTYPE-CONTRACT.md",

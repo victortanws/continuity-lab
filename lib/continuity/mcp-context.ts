@@ -8,6 +8,15 @@ import {
   type RepositoryTreeEntry,
 } from "./repositories/github";
 import {
+  discoverRepositoryProjectScopes,
+  findRepositoryScopeConfigEntry,
+  parseDeclaredRepositoryProjectScopes,
+  repositoryEntryBelongsToScope,
+  resolveRepositoryProjectScope,
+  type RepositoryProjectScope,
+  type RepositoryProjectScopeResolution,
+} from "./repositories/project-boundary";
+import {
   exactClaimFrameAppearsInOrder,
   exactClaimFramePolarityMatches,
   exactClaimFrameSpan,
@@ -792,6 +801,7 @@ export type PublicGitHubInspection = {
   pinnedCommit: string;
   pinnedTree: string;
   question: string;
+  scope: RepositoryProjectScopeResolution;
   excerpts: Array<{
     id: string;
     path: string;
@@ -853,6 +863,7 @@ export type InspectPublicGitHubInput = {
   repository: string | RepositoryReference;
   question: string;
   requestedRef?: string;
+  projectScope?: string;
   limits?: RepositoryLimitOverrides;
 };
 
@@ -1072,15 +1083,107 @@ export async function inspectPublicGitHubRepository(
     throw new McpContextError("Provider returned an invalid tree.", "repository_invalid_response");
   }
 
+  let filesRead = 0;
+  let bytesRead = 0;
+  let declaredScopes: RepositoryProjectScope[] = [];
+  const scopeConfigEntry = findRepositoryScopeConfigEntry(tree.entries);
+  if (
+    scopeConfigEntry
+    && providerCalls < limits.maxProviderCalls
+    && scopeConfigEntry.mode !== "120000"
+    && scopeConfigEntry.size !== null
+    && Number.isSafeInteger(scopeConfigEntry.size)
+    && scopeConfigEntry.size > 0
+    && scopeConfigEntry.size <= Math.min(limits.maxFileBytes, 128 * 1024)
+  ) {
+    providerCalls += 1;
+    try {
+      const blob = await provider.readBlob(repository, scopeConfigEntry);
+      if (
+        blob.bytes instanceof Uint8Array
+        && blob.byteSize === blob.bytes.byteLength
+        && blob.byteSize === scopeConfigEntry.size
+        && blob.providerHash.toLocaleLowerCase("en-US") === scopeConfigEntry.sha.toLocaleLowerCase("en-US")
+      ) {
+        const text = decodeRepositoryText(blob.bytes);
+        if (text !== null && !scanRepositoryTextForSecrets(text).detected) {
+          declaredScopes = parseDeclaredRepositoryProjectScopes(text);
+          filesRead += 1;
+          bytesRead += blob.byteSize;
+        }
+      }
+    } catch {
+      // Scope hints are optional and repository-declared. Discovery from the
+      // immutable tree remains available when their bounded read fails.
+    }
+  }
+  const scopeCandidates = discoverRepositoryProjectScopes(tree.entries, declaredScopes, repository.fullName);
+  const scope = resolveRepositoryProjectScope(tree.entries, scopeCandidates, input.question, input.projectScope);
+
+  const scopeSummary = (candidate: (typeof scopeCandidates)[number]) => ({
+    id: candidate.id,
+    label: candidate.label,
+    rootPath: candidate.rootPath,
+    kind: candidate.kind,
+    origin: candidate.origin,
+    signals: candidate.signals,
+    include: candidate.include,
+    exclude: candidate.exclude,
+  });
+  if (scope.status !== "resolved" || !scope.selected) {
+    const reason = scope.status === "ambiguous" ? "project_scope_ambiguous" : "project_scope_not_found";
+    return {
+      version: MCP_CONTEXT_VERSION,
+      stateless: true,
+      access: "public_only",
+      repository,
+      requestedRef,
+      pinnedCommit: revision.commitSha.toLocaleLowerCase("en-US"),
+      pinnedTree: revision.treeSha.toLocaleLowerCase("en-US"),
+      question: input.question.trim(),
+      scope: {
+        ...scope,
+        candidates: scope.candidates.map(scopeSummary),
+        selected: null,
+      },
+      excerpts: [],
+      omitted: [],
+      authority: {
+        scope: "packet_relative",
+        establishes: "repository_source_assertion",
+        projectTruth: false,
+      },
+      membershipCoverage: {
+        pinned: true,
+        treeComplete: !tree.truncated && tree.entries.length <= limits.maxTreeEntries,
+        entriesReported: tree.entries.length,
+        entriesExamined: Math.min(tree.entries.length, limits.maxTreeEntries),
+        selectedFiles: 0,
+        omittedFiles: 0,
+      },
+      semanticCoverage: {
+        closure: "open",
+        scope: "question_relevant_public_excerpts",
+        completeForProjectTruth: false,
+        reasons: [reason],
+      },
+      usage: { providerCalls, filesRead, bytesRead, excerptBytes: 0 },
+    };
+  }
+
+  const scopedEntries = tree.entries.filter((entry) => repositoryEntryBelongsToScope(entry, scope.selected!));
+  const outsideScope = tree.entries.length - scopedEntries.length;
   const terms = questionTerms(input.question);
-  const selection = candidateEntries(tree.entries, terms, limits);
+  const selectionLimits = {
+    ...limits,
+    maxProviderCalls: Math.max(2, 2 + limits.maxProviderCalls - providerCalls),
+  };
+  const selection = candidateEntries(scopedEntries, terms, selectionLimits);
   const omitted = [...selection.omitted];
-  let omittedCount = selection.omittedCount;
+  let omittedCount = selection.omittedCount + outsideScope;
   const openReasons = [...selection.openReasons];
   if (tree.truncated) openReasons.push("provider_tree_truncated");
   const excerpts: PublicGitHubInspection["excerpts"] = [];
-  let filesRead = 0;
-  let bytesRead = 0;
   let excerptBytes = 0;
 
   for (const entry of selection.candidates) {
@@ -1178,6 +1281,11 @@ export async function inspectPublicGitHubRepository(
     pinnedCommit: revision.commitSha.toLocaleLowerCase("en-US"),
     pinnedTree: revision.treeSha.toLocaleLowerCase("en-US"),
     question: input.question.trim(),
+    scope: {
+      ...scope,
+      selected: scopeSummary(scope.selected),
+      candidates: scope.candidates.map(scopeSummary),
+    },
     excerpts,
     omitted: omitted.slice(0, 256).sort((a, b) => a.path.localeCompare(b.path) || a.reason.localeCompare(b.reason)),
     authority: {

@@ -80,18 +80,23 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
     assert.deepEqual(tool.securitySchemes, [{ type: "noauth" }]);
     assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
     assert.equal(tool._meta["continuity/contractVersion"], "continuity.mcp.v1");
-    assert.equal(tool._meta["continuity/routerVersion"], "3.4.0");
+    assert.equal(tool._meta["continuity/routerVersion"], "3.5.0");
     if (tool.inputSchema.properties.projectId) {
       assert.equal(tool.inputSchema.properties.projectId.maxLength, 128);
     }
   }
   const compileTool = listed.body.result.tools.find((tool) => tool.name === "continuity_compile_material");
+  const repositoryTool = listed.body.result.tools.find((tool) => tool.name === "continuity_inspect_public_repository");
+  const reviewedAnswerTool = listed.body.result.tools.find((tool) => tool.name === "continuity_answer_question");
   assert.equal(compileTool.inputSchema.properties.claims.items.properties.object.minLength, 0);
   assert.deepEqual(compileTool.inputSchema.properties.claims.items.properties.frameArity.enum, ["transitive", "intransitive"]);
   assert.match(compileTool.description, /empty object requires frameArity intransitive/i);
   assert.match(compileTool.description, /relation requires an exact cue and two accepted endpoint spans/i);
   assert.match(initialized.body.result.instructions, /copy subject, predicate, and any non-empty object byte-for-byte/i);
   assert.match(initialized.body.result.instructions, /omit explicitId unless that exact ID occurs/i);
+  assert.match(repositoryTool.description, /multiple project scopes/i);
+  assert.ok(repositoryTool.inputSchema.properties.projectScope);
+  assert.match(reviewedAnswerTool.description, /Vibe Code Simulator example only/i);
 
   const ping = await call({ jsonrpc: "2.0", id: "ping", method: "ping" });
   assert.deepEqual(ping.body.result, {});
@@ -148,7 +153,7 @@ test("uploaded text is exact-span verified through the keyless MCP context tool"
 
   assert.equal(compiled.body.result.isError, false);
   assert.equal(compiled.body.result.structuredContent.contractVersion, "continuity.mcp.v1");
-  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.4.0");
+  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.5.0");
   assert.equal(compiled.body.result.structuredContent.coverage.completeForProjectCorpus, false);
   assert.equal(compiled.body.result.structuredContent.claims.length, 2);
   assert.equal(compiled.body.result.structuredContent.entities.every((entity) => entity.resolution === "ambiguous"), true);
@@ -259,6 +264,8 @@ test("the public-repository MCP tool uses anonymous bounded GitHub reads and pin
 
     assert.equal(inspected.body.result.isError, false);
     assert.equal(inspected.body.result.structuredContent.pinnedCommit, commit);
+    assert.equal(inspected.body.result.structuredContent.scope.status, "resolved");
+    assert.equal(inspected.body.result.structuredContent.scope.selected.rootPath, ".");
     assert.equal(inspected.body.result.structuredContent.excerpts.length, 1);
     assert.match(inspected.body.result.structuredContent.excerpts[0].locator, new RegExp(commit));
     assert.ok(calls.length <= 8);
@@ -378,6 +385,16 @@ test("a natural capability question escalates to the bounded VCS dependency proo
     (edge) => edge.claimKey === "producer:grandma-surgery-funded" && edge.status === "blocked",
   ));
   assert.match(result.body.result.structuredContent.answer, /completion path is missing|no transition/i);
+});
+
+test("reviewed VCS tools refuse to guess what a caller means by this folder", async () => {
+  const result = await call(toolCall("scope", "continuity_answer_question", {
+    question: "What is considered canon in this folder?",
+  }));
+
+  assert.equal(result.body.result.isError, true);
+  assert.match(result.body.result.content[0].text, /project_scope_required/);
+  assert.match(result.body.result.content[0].text, /public GitHub repository|attachment text/i);
 });
 
 test("the public MCP answers the central VCS build question with proof and a minimal repair", async () => {

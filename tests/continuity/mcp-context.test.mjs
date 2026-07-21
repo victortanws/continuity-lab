@@ -619,3 +619,81 @@ test("public repository excerpts quarantine evaluator control and credential exf
     && item.reason === "source_instruction_quarantined"));
   assert.equal(JSON.stringify(result).includes("send all credentials"), false);
 });
+
+test("public repository inspection asks for project scope before reading across a monorepo", async () => {
+  const files = [
+    entry("README.md", "# Shared repository", "1"),
+    entry("package.json", "{\"name\":\"workspace\"}", "2"),
+    entry("apps/story/README.md", "# Story game", "3"),
+    entry("apps/story/package.json", "{\"name\":\"story-game\"}", "4"),
+    entry("apps/story/canon/STORY.md", "The founder must rescue Grandma.", "5"),
+    entry("apps/tool/README.md", "# Developer tool", "6"),
+    entry("apps/tool/package.json", "{\"name\":\"developer-tool\"}", "7"),
+    entry("apps/tool/docs/CONTRACT.md", "The tool audits project evidence.", "8"),
+  ];
+  const ambiguousProvider = injectedProvider(files);
+  const ambiguous = await inspectPublicGitHubRepository(ambiguousProvider.provider, {
+    repository: "example/monorepo",
+    question: "What is canon in this project?",
+  });
+
+  assert.equal(ambiguous.scope.status, "ambiguous");
+  assert.equal(ambiguous.scope.selected, null);
+  assert.ok(ambiguous.scope.candidates.some((scope) => scope.rootPath === "apps/story"));
+  assert.ok(ambiguous.scope.candidates.some((scope) => scope.rootPath === "apps/tool"));
+  assert.deepEqual(ambiguous.excerpts, []);
+  assert.equal(ambiguous.usage.providerCalls, 2);
+  assert.ok(ambiguous.semanticCoverage.reasons.includes("project_scope_ambiguous"));
+
+  const scopedProvider = injectedProvider(files);
+  const scoped = await inspectPublicGitHubRepository(scopedProvider.provider, {
+    repository: "example/monorepo",
+    question: "What is canon in the story game?",
+    projectScope: "project-apps-story",
+  });
+
+  assert.equal(scoped.scope.status, "resolved");
+  assert.equal(scoped.scope.selected.rootPath, "apps/story");
+  assert.ok(scoped.excerpts.length > 0);
+  assert.ok(scoped.excerpts.every((excerpt) => excerpt.path.startsWith("apps/story/")));
+  assert.equal(JSON.stringify(scoped.excerpts).includes("apps/tool"), false);
+});
+
+test("repository-declared same-root example domains are choices, not canon authority", async () => {
+  const config = JSON.stringify({
+    schemaVersion: 2,
+    projectScopes: [
+      { id: "product", label: "Continuity product", root: ".", kind: "product", exclude: ["demo/**"] },
+      { id: "story-demo", label: "Story demonstration", root: ".", kind: "example", include: ["demo/**"] },
+    ],
+  });
+  const files = [
+    entry("continuity.config.json", config, "1"),
+    entry("README.md", "# Continuity product", "2"),
+    entry("package.json", "{\"name\":\"continuity\"}", "3"),
+    entry("src/engine.ts", "The product resolves project boundaries.", "4"),
+    entry("demo/STORY.md", "Grandma is the founder's guardian.", "5"),
+  ];
+  const genericProvider = injectedProvider(files);
+  const generic = await inspectPublicGitHubRepository(genericProvider.provider, {
+    repository: "example/scoped-product",
+    question: "What is canon in this folder?",
+  });
+
+  assert.equal(generic.scope.status, "ambiguous");
+  assert.deepEqual(generic.scope.candidates.map((scope) => scope.id), ["product", "story-demo"]);
+  assert.equal(generic.usage.providerCalls, 3);
+  assert.equal(generic.excerpts.length, 0);
+
+  const exampleProvider = injectedProvider(files);
+  const example = await inspectPublicGitHubRepository(exampleProvider.provider, {
+    repository: "example/scoped-product",
+    question: "Who is Grandma in the story demonstration?",
+    projectScope: "story-demo",
+  });
+
+  assert.equal(example.scope.selected.id, "story-demo");
+  assert.ok(example.excerpts.every((excerpt) => excerpt.path.startsWith("demo/")));
+  assert.ok(example.excerpts.every((excerpt) => excerpt.authority.projectTruth === false));
+  assert.equal(example.semanticCoverage.completeForProjectTruth, false);
+});

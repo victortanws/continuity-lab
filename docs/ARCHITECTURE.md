@@ -225,6 +225,7 @@ The efficient end-to-end path is therefore:
 ```text
 GitHub or uploaded files
   -> resolve immutable version
+  -> discover and select one project/evidence scope
   -> select and fingerprint safe sources
   -> R2 originals + D1 snapshot manifest
   -> retrieval index + question-scoped derived dependency slice
@@ -235,11 +236,31 @@ GitHub or uploaded files
 
 Repository routing files such as `AGENTS.md`, authority manifests, and source-priority tables can inform selection and precedence after they have been classified by the product. They are evidence/configuration, not executable instructions from an untrusted repository. Source text remains inside the untrusted evidence envelope used by the reasoner.
 
+### Project and evidence-domain boundary
+
+Authority routing begins only after the question has one project scope. The
+repository boundary resolver examines the immutable tree for root and nested
+project markers such as package manifests, README/AGENTS files, and an optional
+Continuity configuration. A configuration may also declare same-root evidence
+domains—for example, a product and its worked example—with bounded include and
+exclude patterns.
+
+These declarations are routing hints, not authority. They cannot grant canon,
+prove completeness, or erase independently discovered project roots. When one
+generic question could refer to more than one root or evidence domain, the
+inspector returns `ambiguous`, no excerpts, and the available scope IDs. The
+client must ask the user or call again with the optional `projectScope`. Once a
+scope is resolved, files outside it are excluded before relevance scoring.
+
+This protects monorepositories and nested projects from accidental evidence
+blending while preserving a cheap single-root path for ordinary repositories.
+
 ### Project-declared authority routing
 
 The MVP recognizes an optional root `continuity.config.json` (or
 `.continuity/config.json`) after the hard safety filter has selected files. Its
-bounded `sourceRoutes` are treated as repository-declared hints: they may
+bounded `projectScopes` identify possible evidence domains, while its bounded
+`sourceRoutes` are treated as repository-declared hints: they may
 preserve or lower the conservative path classification, but may not promote a
 file to a stronger source role or authority and may not establish a typed
 completeness boundary. A `closedWorld` Boolean is retained only as legacy
@@ -425,15 +446,18 @@ IDs. The compiler resolves those indices to exact server IDs and the graph
 admits an edge only when its support and both endpoints are admitted atomic
 evidence. These source-assertion edges improve causal navigation but do not
 replace the trusted transition registry required for reachability proof.
-`continuity_inspect_public_repository` performs one anonymous,
-commit-pinned, question-scoped GitHub read and returns bounded excerpts; exact
-claims from those excerpts must still pass through the compiler. None invokes
+`continuity_inspect_public_repository` performs one anonymous, commit-pinned,
+question-scoped GitHub read. It resolves a project scope before returning
+bounded excerpts; ambiguous generic questions return scope choices rather than
+mixed evidence. Exact claims from those excerpts must still pass through the
+compiler. None invokes
 an OpenAI API model, accepts a GitHub/OpenAI token, writes project state, or
 promotes source assertions to canon.
 
 The transport contract is `continuity.mcp.v1`, independent of authority-router
-version metadata. This keeps the v3.2 tool names and schemas stable while v3.3
-adds capabilities. A production private-workspace integration still needs
+version metadata. This keeps the v3.2 tool names stable while later routers add
+capabilities. Router v3.5 adds only an optional `projectScope` repository input
+and an explicit scope receipt. A production private-workspace integration still needs
 connector authentication and per-project authorization, stable resource
 handlers, durable quotas, consented mutation tools, and deployment monitoring.
 

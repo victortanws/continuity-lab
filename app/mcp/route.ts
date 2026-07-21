@@ -100,9 +100,9 @@ const TOOL_ANNOTATIONS = Object.freeze({
 const NOAUTH_SECURITY_SCHEMES = Object.freeze([{ type: "noauth" as const }]);
 
 const TOOL_TITLES: Record<ExposedToolName, string> = {
-  continuity_answer_question: "Answer a continuity question",
-  continuity_trace_dependencies: "Trace continuity dependencies",
-  continuity_analyze_change: "Analyze a proposed change",
+  continuity_answer_question: "Ask about the Vibe Code Simulator example",
+  continuity_trace_dependencies: "Trace Vibe Code Simulator dependencies",
+  continuity_analyze_change: "Analyze a Vibe Code Simulator change",
   continuity_compile_material: "Verify uploaded or pasted material",
   continuity_inspect_public_repository: "Inspect a public GitHub repository",
 };
@@ -308,13 +308,48 @@ const REPOSITORY_TOOL_OUTPUT_SCHEMA = {
   additionalProperties: false,
   required: [
     "contractVersion", "routerVersion", "sourceKind", "question", "repository",
-    "requestedRef", "pinnedCommit", "coverage", "excerpts", "omitted", "usage", "diagnostics",
+    "requestedRef", "pinnedCommit", "scope", "coverage", "excerpts", "omitted", "usage", "diagnostics",
   ],
   properties: {
     contractVersion: { type: "string", enum: [CONTINUITY_MCP_CONTRACT_VERSION] },
     routerVersion: { type: "string", enum: [AUTHORITY_ROUTER_VERSION] },
     sourceKind: { type: "string", enum: ["public_github"] },
     question: { type: "string" }, repository: { type: "string" }, requestedRef: { type: "string" }, pinnedCommit: { type: "string" },
+    scope: {
+      type: "object",
+      additionalProperties: false,
+      required: ["status", "selected", "candidates", "requestedScope", "reason"],
+      properties: {
+        status: { type: "string", enum: ["resolved", "ambiguous", "not_found"] },
+        selected: {
+          type: ["object", "null"],
+          additionalProperties: false,
+          required: ["id", "label", "rootPath", "kind", "origin", "signals"],
+          properties: {
+            id: { type: "string" }, label: { type: "string" }, rootPath: { type: "string" },
+            kind: { type: "string", enum: ["product", "story", "example", "fixture", "subtree"] },
+            origin: { type: "string", enum: ["repository_declared", "discovered", "explicit_subtree"] },
+            signals: { type: "array", items: { type: "string" } },
+          },
+        },
+        candidates: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "label", "rootPath", "kind", "origin", "signals"],
+            properties: {
+              id: { type: "string" }, label: { type: "string" }, rootPath: { type: "string" },
+              kind: { type: "string", enum: ["product", "story", "example", "fixture", "subtree"] },
+              origin: { type: "string", enum: ["repository_declared", "discovered", "explicit_subtree"] },
+              signals: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+        requestedScope: { type: ["string", "null"] },
+        reason: { type: "string" },
+      },
+    },
     coverage: {
       type: "object",
       additionalProperties: false,
@@ -406,7 +441,7 @@ export async function POST(request: Request): Promise<Response> {
       protocolVersion,
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "continuity-lab-reviewed-sample", version: "0.2.0" },
-      instructions: "Read-only, stateless continuity tools. Reviewed VCS tools never synchronize a repository or invoke a paid model provider. For uploaded or pasted material, read only question-relevant text, propose exact quotes and entity mentions to continuity_compile_material, then answer from the verified receipt; rejected or absent claims remain unknown. In each claim, copy subject, predicate, and any non-empty object byte-for-byte from the quote in that order. Use frameArity intransitive with object \"\" only for a single copied predicate token that finishes the quoted clause; never discard an expressed object. Mark polarity negative only when the quote directly negates the claim. Omit explicitId unless that exact ID occurs in the entity quote. claimKind classifies a source assertion and never grants authority. For causal structure, optionally propose relations by original claim index: the supporting positive causal, normative, or historical claim must contain the exact cue and both accepted endpoint spans. Direction is prerequisite to dependent, trigger to effect, or earlier to later. Do not materialize negative, or/unless, or alternative-path logic as a simple edge; admitted edges aid navigation and are not reachability proofs. For a public GitHub URL, call continuity_inspect_public_repository first, then pass returned excerpts to continuity_compile_material when exact entity, conflict, or causal structure is needed. Neither path promotes source assertions to project canon. Change analyses are proposals and never become canon.",
+      instructions: "Read-only, stateless continuity tools. The three reviewed-example tools apply only to the immutable Vibe Code Simulator example; they never synchronize a repository and must never answer what is true in an arbitrary folder, repository, or project. For a public GitHub URL, call continuity_inspect_public_repository first. If it returns multiple project scopes, ask the user which one they mean and call it again with projectScope; never blend scopes. For uploaded or pasted material, read only question-relevant text, propose exact quotes and entity mentions to continuity_compile_material, then answer from the verified receipt; rejected or absent claims remain unknown. In each claim, copy subject, predicate, and any non-empty object byte-for-byte from the quote in that order. Use frameArity intransitive with object \"\" only for a single copied predicate token that finishes the quoted clause; never discard an expressed object. Mark polarity negative only when the quote directly negates the claim. Omit explicitId unless that exact ID occurs in the entity quote. claimKind classifies a source assertion and never grants authority. For causal structure, optionally propose relations by original claim index: the supporting positive causal, normative, or historical claim must contain the exact cue and both accepted endpoint spans. Direction is prerequisite to dependent, trigger to effect, or earlier to later. Do not materialize negative, or/unless, or alternative-path logic as a simple edge; admitted edges aid navigation and are not reachability proofs. After repository scope resolution, pass returned excerpts to continuity_compile_material when exact entity, conflict, or causal structure is needed. Neither path promotes source assertions to project canon. Change analyses are proposals and never become canon.",
     });
   }
 
@@ -595,7 +630,7 @@ function queryForTool(name: ReviewedToolName, input: JsonObject): QueryRequest {
 function validateContextToolArguments(name: ContextToolName, input: JsonObject): string | null {
   const allowed = name === "continuity_compile_material"
     ? new Set(["question", "documents", "claims", "entityMentions", "relations"])
-    : new Set(["repository", "question", "requestedRef"]);
+    : new Set(["repository", "question", "requestedRef", "projectScope"]);
   const unexpected = Object.keys(input).filter((key) => !allowed.has(key));
   if (unexpected.length) return `Unexpected argument${unexpected.length === 1 ? "" : "s"}: ${unexpected.join(", ")}.`;
   if (typeof input.question !== "string" || !input.question.trim()) return "question is required.";
@@ -613,6 +648,10 @@ function validateContextToolArguments(name: ContextToolName, input: JsonObject):
   if (input.requestedRef !== undefined
     && (typeof input.requestedRef !== "string" || !input.requestedRef.trim() || input.requestedRef.length > 200)) {
     return "requestedRef must be a non-empty string no longer than 200 characters.";
+  }
+  if (input.projectScope !== undefined
+    && (typeof input.projectScope !== "string" || !input.projectScope.trim() || input.projectScope.length > 240)) {
+    return "projectScope must be a non-empty scope ID or repository-relative path no longer than 240 characters.";
   }
   return null;
 }
@@ -743,6 +782,7 @@ async function inspectRepositoryTool(input: JsonObject) {
       repository: input.repository as string,
       question: (input.question as string).trim(),
       requestedRef: typeof input.requestedRef === "string" ? input.requestedRef.trim() : undefined,
+      projectScope: typeof input.projectScope === "string" ? input.projectScope.trim() : undefined,
       limits: {
         maxTreeEntries: 1_000,
         maxFiles: 6,
@@ -765,6 +805,13 @@ async function inspectRepositoryTool(input: JsonObject) {
     repository: inspection.repository.fullName,
     requestedRef: inspection.requestedRef,
     pinnedCommit: inspection.pinnedCommit,
+    scope: {
+      status: inspection.scope.status,
+      selected: inspection.scope.selected ? publicScope(inspection.scope.selected) : null,
+      candidates: inspection.scope.candidates.map(publicScope),
+      requestedScope: inspection.scope.requestedScope,
+      reason: inspection.scope.reason,
+    },
     coverage: {
       membershipPinned: inspection.membershipCoverage.pinned,
       treeComplete: inspection.membershipCoverage.treeComplete,
@@ -785,12 +832,20 @@ async function inspectRepositoryTool(input: JsonObject) {
       "This was an anonymous read of a public repository; no GitHub or OpenAI credential was accepted or used.",
       "The commit is pinned, but the excerpt set is question-scoped and cannot prove a universal absence in the repository.",
       "For exact entity resolution or causal verification, call continuity_compile_material with the returned excerpts and exact-span proposals.",
+      ...(inspection.scope.candidates.some((candidate) => candidate.origin === "repository_declared")
+        ? ["Repository-declared project scopes guide selection only; they do not grant canon authority or complete coverage."]
+        : []),
     ],
   };
+  const scopeChoice = structuredContent.scope.status === "ambiguous"
+    ? `This repository contains multiple possible project scopes: ${structuredContent.scope.candidates.map((candidate) => `${candidate.label} (${candidate.id})`).join(", ")}. Ask the user which one they mean, then call this tool again with projectScope.`
+    : structuredContent.scope.status === "not_found"
+      ? `The requested project scope was not found. Available scopes: ${structuredContent.scope.candidates.map((candidate) => `${candidate.label} (${candidate.id})`).join(", ") || "none"}.`
+      : `Scoped to ${structuredContent.scope.selected?.label ?? "the selected project"}.`;
   return {
     content: [{
       type: "text",
-      text: `Pinned ${structuredContent.repository} at ${structuredContent.pinnedCommit} and returned ${structuredContent.excerpts.length} bounded excerpt(s); semantic coverage is ${structuredContent.coverage.semanticClosure}.`,
+      text: `${scopeChoice} Pinned ${structuredContent.repository} at ${structuredContent.pinnedCommit} and returned ${structuredContent.excerpts.length} bounded excerpt(s); semantic coverage is ${structuredContent.coverage.semanticClosure}.`,
     }],
     structuredContent,
     isError: false,
@@ -986,7 +1041,33 @@ function reviewedScopeError(input: JsonObject): ReturnType<typeof toolError> | n
       `This transport is pinned to ${VCS_DEMO_REVISION}; it will not silently substitute or synchronize another revision.`,
     );
   }
+  const question = typeof input.question === "string" ? input.question
+    : typeof input.targetRef === "string" ? input.targetRef
+      : typeof input.change === "string" ? input.change : "";
+  if (requiresExternalScope(question)) {
+    return toolError(
+      "project_scope_required",
+      "The reviewed-example tools cannot infer what ‘this folder’, ‘this repository’, or ‘this project’ means. They contain only the Vibe Code Simulator example. Supply the public GitHub repository to continuity_inspect_public_repository, or pass relevant attachment text to continuity_compile_material.",
+    );
+  }
   return null;
+}
+
+function requiresExternalScope(value: string): boolean {
+  if (/\b(?:vibe\s+code|vibe\s+coder|vcs)\b/i.test(value)) return false;
+  return /\b(?:this|current)\s+(?:folder|repository|repo|project|codebase)\b/i.test(value)
+    || /\b(?:folder|repository|repo|project|codebase)\s+(?:here|i(?:'m| am)\s+in)\b/i.test(value);
+}
+
+function publicScope(scope: { id: string; label: string; rootPath: string; kind: string; origin: string; signals: string[] }) {
+  return {
+    id: scope.id,
+    label: scope.label,
+    rootPath: scope.rootPath,
+    kind: scope.kind,
+    origin: scope.origin,
+    signals: scope.signals,
+  };
 }
 
 function toolSuccess(result: QueryResult) {

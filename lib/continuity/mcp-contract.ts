@@ -72,7 +72,7 @@ export const continuityMcpTools = {
     },
   },
   continuity_answer_question: {
-    description: "Answer a continuity question with typed verdicts, stable citations, and explicit coverage.",
+    description: "Answer a question about the immutable reviewed Vibe Code Simulator example only, with typed verdicts, stable citations, and explicit coverage. Do not use this tool for an arbitrary folder or repository; inspect that repository or compile the supplied material instead.",
     inputSchema: {
       ...projectRevisionInput,
       required: [...projectRevisionInput.required, "question"],
@@ -85,7 +85,7 @@ export const continuityMcpTools = {
     },
   },
   continuity_trace_dependencies: {
-    description: "Trace evidence-backed requirements, effects, blockers, and reachability for a goal or event.",
+    description: "Trace evidence-backed requirements, effects, blockers, and reachability inside the immutable reviewed Vibe Code Simulator example only.",
     inputSchema: {
       ...projectRevisionInput,
       required: [...projectRevisionInput.required, "targetRef"],
@@ -93,7 +93,7 @@ export const continuityMcpTools = {
     },
   },
   continuity_analyze_change: {
-    description: "Simulate a proposed change without promoting it to canon.",
+    description: "Simulate a proposed change to the immutable reviewed Vibe Code Simulator example without promoting it to canon.",
     inputSchema: {
       ...projectRevisionInput,
       required: [...projectRevisionInput.required, "change"],
@@ -225,7 +225,7 @@ export const continuityMcpTools = {
     },
   },
   continuity_inspect_public_repository: {
-    description: "Use when the user supplies a public GitHub repository and a canon question. After a durable service-global reservation, resolve one immutable commit and return a small safe set of question-relevant excerpts. For exact entity or causal verification, pass those excerpts to continuity_compile_material. Private repositories are not accessed.",
+    description: "Use when the user supplies a public GitHub repository and a canon question. Discover independent project roots and declared evidence domains before selecting excerpts. If there are multiple project scopes, return the choices and ask the user to select one with projectScope. After scope resolution, pin one immutable commit and return a small safe set of question-relevant excerpts. For exact entity or causal verification, pass those excerpts to continuity_compile_material. Private repositories are not accessed.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -234,6 +234,7 @@ export const continuityMcpTools = {
         repository: { type: "string", minLength: 3, maxLength: 240 },
         question: { type: "string", minLength: 1, maxLength: 4_096 },
         requestedRef: { type: "string", minLength: 1, maxLength: 200 },
+        projectScope: { type: "string", minLength: 1, maxLength: 240 },
       },
     },
   },

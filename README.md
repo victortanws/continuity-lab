@@ -48,8 +48,11 @@ device.
    bible, product contract, or decision record—and compares them with relevant
    code and tests. In Vibe Code Simulator, this is how it found
    `docs/STORY-CANON.md`. A filename or folder is a routing clue, not automatic
-   proof that a file is approved canon. Leave the version field blank unless
-   you need a particular branch, release, or commit.
+   proof that a file is approved canon. If the repository contains more than
+   one application, story, or worked example, Continuity Lab lists the possible
+   project scopes before reading across them. Select the project you mean; it
+   will not blend their sources. Leave the version field blank unless you need
+   a particular branch, release, or commit.
 3. Ask a focused question. For example:
 
    - “Do these two character descriptions refer to the same person?”
@@ -89,6 +92,10 @@ the current [OpenAI Apps SDK connection guide](https://developers.openai.com/app
 
 - **Source:** a file, excerpt, repository file, record, or other piece of
   material that may support an answer.
+- **Project scope:** the particular application, story, package, or reviewed
+  example that a question is about. A repository can contain several scopes.
+  Choosing one prevents an answer about one project from borrowing evidence
+  from another.
 - **Entity:** a person, character, place, event, rule, item, organization, or
   other thing mentioned in the material. In the public interface we usually
   call these “people and things.”
@@ -311,15 +318,20 @@ the product:
   exact cue and both endpoint spans. These edges are source assertions for
   navigation, not automatic proof that an event is reachable.
 - `continuity_inspect_public_repository` is one current acquisition connector.
-  It pins a public GitHub repository to one commit and returns a small safe set
-  of question-relevant excerpts. Selection uses safe path and question clues to
-  look first for likely intent sources—story bibles, canon files, contracts,
-  decision records, and specifications—and then for relevant implementation
-  and tests. ChatGPT can pass those excerpts into `continuity_compile_material`
-  for exact entity, conflict, or causal inspection. These clues do not approve
-  a repository file as project canon. Future authenticated repositories,
-  document parsers, databases, ledgers, and media-description adapters can feed
-  the same compiler boundary without changing the underlying truth model.
+  It pins a public GitHub repository to one commit, discovers independent
+  project roots and declared evidence domains, and then returns a small safe
+  set of question-relevant excerpts from one selected scope. If a generic
+  question could refer to several projects, it returns the choices and asks
+  ChatGPT to call it again with `projectScope`. Selection then uses safe path
+  and question clues to look first for likely intent sources—story bibles,
+  canon files, contracts, decision records, and specifications—and then for
+  relevant implementation and tests. ChatGPT can pass those excerpts into
+  `continuity_compile_material` for exact entity, conflict, or causal
+  inspection. Scope declarations and filenames are routing clues; they do not
+  approve a repository file as project canon. Future authenticated
+  repositories, document parsers, databases, ledgers, and media-description
+  adapters can feed the same compiler boundary without changing the underlying
+  truth model.
 
 ### Ask about uploaded files or a repository
 
@@ -375,14 +387,17 @@ flattened into misleading edges. This is not yet a durable whole-corpus
 knowledge graph, alternative-path solver, or automatic natural-language
 causality theorem prover.
 
-### Router v3.4 compatibility
+### Router v3.5 compatibility
 
 The public transport remains MCP `2025-06-18`, and its stable data contract is
-`continuity.mcp.v1`. Authority-router version `3.4.0` is advertised separately
+`continuity.mcp.v1`. Authority-router version `3.5.0` is advertised separately
 as namespaced tool metadata, so router changes do not rename tools or resource
 identities. The three v3.2 reviewed-sample tools keep their existing names,
-inputs, and output shape; v3.3 added the two context tools, while v3.4 adds a
-server-authored proof contract and target-prioritized context capsule. Tests exercise
+inputs, and output shape; v3.3 added the two context tools, v3.4 added a
+server-authored proof contract and target-prioritized context capsule, and v3.5
+adds project-boundary resolution before repository retrieval. The public
+repository tool gains an optional `projectScope` input and a scope receipt;
+the five tool names and v1 contract remain stable. Tests exercise
 initialization, all five descriptors, the original VCS calls, exact upload
 verification, anonymous commit pinning, and the $47,000 regression. Clients
 should branch on advertised capabilities and `contractVersion`, not parse the
@@ -466,8 +481,9 @@ requires a trusted complete transition registry or reviewed adapter.
 - **MCP:** an executable stateless `/api/mcp` hosted transport for five read-only
   tools, with `/mcp` retained for compatible direct-worker and local hosts:
   three over `vcs-demo-r2`, one exact-span text-packet compiler, and one bounded
-  anonymous public-GitHub inspector. Authenticated persisted/private workspaces
-  and resource handlers are not implemented.
+  anonymous public-GitHub inspector with pre-retrieval project-scope discovery.
+  Authenticated persisted/private workspaces and resource handlers are not
+  implemented.
 
 ### Hosted environment values
 
@@ -505,9 +521,11 @@ The Site's Git commit deploys the application. It is not a live runtime mount of
 GitHub or a developer's local folder. See `docs/ARCHITECTURE.md` for the snapshot,
 webhook, build-time bundle, and remote MCP/orchestrator patterns.
 
-An analyzed repository may suggest source routes in `continuity.config.json`,
-but it cannot promote itself to immutable authority or issue a completeness
-boundary. Stronger
+An analyzed repository may suggest project scopes and source routes in
+`continuity.config.json`, but it cannot promote itself to immutable authority,
+hide independently discovered project roots, or issue a completeness boundary.
+A generic question over several possible scopes stops for selection instead of
+merging them. Stronger
 claim policy must be approved and stored outside the analyzed revision.
 Intent and decision paths such as README files, story bibles, contracts, and
 ADRs therefore default to `reference` authority for an arbitrary repository;
