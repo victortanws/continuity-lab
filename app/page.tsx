@@ -530,14 +530,14 @@ export default function Home() {
         <div className="hero-image" aria-hidden="true" />
         <div className="hero-inner">
           <div className="hero-copy-block">
-            <div className="eyebrow">STORY QUESTIONS, GROUNDED IN MATERIAL YOU CHOOSE</div>
+            <div className="eyebrow">Continuity for your longer form narrative projects, grounded in your own materials.</div>
             <h1>Towards a new paradigm in<br/><em>game development and continuity.</em></h1>
             <p>See a reviewed example here, then bring your own script, notes, or public game repository into ChatGPT through the read-only Continuity Lab MCP. Ask what is true, what can happen next, or what else must change—and see the sources behind the answer.</p>
           </div>
 
           <div className="question-card">
             <div className="demo-context">
-              <div><span>DETERMINISTIC WORKED EXAMPLE</span><strong>This page is a demonstration—not an open-ended API playground.</strong></div>
+              <div><span>DETERMINISTIC WORKED EXAMPLE</span></div>
               <button type="button" onClick={() => { setSourcePanel("sample"); document.getElementById("sources")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}><Icon name="branch" size={14}/> Repository selected: Vibe Code Simulator</button>
               <p>In the full story, the Founder promises to pay <b>$47,000</b> for his grandmother&apos;s sight-restoring operation. The playable prototype currently covers Days 7–8 and begins with only $700. The question below asks whether the implemented game can actually reach that promised outcome.</p>
             </div>
@@ -555,7 +555,7 @@ export default function Home() {
 
       <section className="sources-section" id="sources">
         <div className="section-intro">
-          <div><div className="eyebrow dark">QUICK START</div><h2>How it works</h2><p>Run the deterministic Vibe Code Simulator example here. To use your own material, connect the read-only MCP to ChatGPT, attach a file or name an explicit public GitHub repository, and ask the same evidence-grounded questions in conversation.</p></div>
+          <div><div className="eyebrow dark">QUICK START</div><h2>How it works</h2><p>Run the deterministic Vibe Code Simulator example here. To use your own material, <button type="button" className="inline-mcp-link" onClick={() => { setSourcePanel("mcp"); window.requestAnimationFrame(() => document.getElementById("sources")?.scrollIntoView({ behavior: "smooth", block: "start" })); }}>connect the read-only MCP to ChatGPT</button>, attach a file or name an explicit public GitHub repository, and ask the same evidence-grounded questions in conversation.</p></div>
         </div>
 
         <div className="pipeline" aria-label="Continuity Lab processing pipeline">
@@ -580,11 +580,6 @@ export default function Home() {
             {sourcePanel === "mcp" && <McpPanel/>}
           </div>
         </div>
-      </section>
-
-      <section className="recorded-demo-section" id="recorded-demo">
-        <div className="recorded-demo-copy"><div className="eyebrow">CONTROLLED API DEMONSTRATION</div><h2>One real GPT-5.6 run.<br/><em>Zero public key exposure.</em></h2><p>The Build Week presentation uses a recorded, presenter-controlled API run so the model behavior can be evaluated without giving anonymous visitors access to the creator&apos;s API budget. The public experience remains deterministic; the MCP lets visitors try their own material through their own ChatGPT conversation.</p><div className="recording-status"><span/><strong>Recording slot prepared</strong><small>Add the final presenter recording here without changing the public safety architecture.</small></div></div>
-        <div className="recorded-demo-frame" aria-label="Reserved frame for the recorded GPT-5.6 API demonstration"><img src="/og.png" alt="Continuity Lab demonstration preview"/><div><span>RECORDED GPT-5.6 API DEMONSTRATION</span><strong>Presenter-controlled run</strong><small>The recording will show the exact reviewed question, cited evidence, dependency trace, and model receipt.</small></div></div>
       </section>
 
       <section className={`analysis-section ${hasAnalyzed ? "has-result" : ""}`} id="analysis">
