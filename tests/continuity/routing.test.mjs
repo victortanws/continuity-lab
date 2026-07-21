@@ -259,6 +259,49 @@ test("analysis routing enforces its evidence budget even with many contradiction
   assert.equal(result.route.coverage.closure, "open");
 });
 
+test("a large repository keeps exact targets in the bounded context capsule and records what was deferred", () => {
+  const distant = Array.from({ length: 160 }, (_, index) => evidence({
+    id: `EV-DISTANT-${index}`,
+    sourceId: `SRC-DISTANT-${index}`,
+    sourceVersionId: `SRC-DISTANT-${index}@v1`,
+    title: `modules/feature-${index}/state.ts`,
+    locator: `modules/feature-${index}/state.ts:1-3`,
+    role: "implementation",
+    authority: "production",
+    claimKinds: ["implemented", "causal"],
+    claimKind: "causal",
+    claimKey: `feature:${index}:ready`,
+    score: 0.99 - index / 10_000,
+  }));
+  const target = evidence({
+    id: "EV-REMOTE-TARGET",
+    sourceId: "SRC-ENDING-TRIGGER",
+    sourceVersionId: "SRC-ENDING-TRIGGER@v7",
+    title: "src/story/ending/payment-trigger.ts",
+    locator: "src/story/ending/payment-trigger.ts:88-106",
+    role: "implementation",
+    authority: "production",
+    claimKinds: ["implemented", "causal"],
+    claimKind: "causal",
+    claimKey: "ending:operation-funded",
+    score: 0.02,
+  });
+
+  const result = routeEvidence([...distant, target], {
+    projectId: "project-a",
+    question: "Can the ending operation become funded?",
+    targetClaimKeys: ["ending:operation-funded"],
+    coverage: { scope: "commit-pinned repository", complete: false },
+  });
+
+  assert.equal(result.route.mode, "trace_dependencies");
+  assert.equal(result.evidence.some((item) => item.id === target.id), true);
+  assert.ok(result.evidence.length <= result.route.budget.maxEvidence);
+  assert.ok(result.route.coverage.deferredEvidenceIds.length > 100);
+  assert.equal(result.route.coverage.truncated, true);
+  assert.equal(result.route.coverage.closure, "open");
+});
+
 test("quarantined context cannot satisfy a lane or crowd admissible evidence out of the budget", () => {
   const quarantined = Array.from({ length: 20 }, (_, index) => evidence({
     id: `EV-QUARANTINED-${index}`,
@@ -577,7 +620,7 @@ test("the server owns presentation depth and uses bounded non-recursive budgets"
   assert.equal(focused.route.presentationDepth, "focused");
   assert.deepEqual(focused.route.budget, {
     profile: "answer_focused",
-    maxRetrievalLanes: 1,
+    maxRetrievalLanes: 2,
     maxResultsPerLane: 6,
     maxEvidence: 8,
     maxCompilerPasses: 1,

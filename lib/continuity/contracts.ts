@@ -1,10 +1,10 @@
 export const CONTINUITY_ANSWER_VERSION = "continuity.answer.v7" as const;
 /**
  * The router implementation can evolve without changing the public answer or
- * MCP contract. Keep this separate from `CONTINUITY_ANSWER_VERSION`: v3.3 is
- * an analysis/compiler upgrade, not a wire-format reset.
+ * MCP contract. Keep this separate from `CONTINUITY_ANSWER_VERSION`: v3.4 is
+ * a proof-contract/routing upgrade, not a wire-format reset.
  */
-export const AUTHORITY_ROUTER_VERSION = "3.3.0" as const;
+export const AUTHORITY_ROUTER_VERSION = "3.4.0" as const;
 
 export type CanonAuthority =
   | "immutable"
@@ -218,6 +218,9 @@ export type AnalysisRoute = {
   policyId: string;
   policyVersion: string;
   mode: AnalysisMode;
+  /** The query-specific proof boundary compiled before retrieval. Optional on
+   * older stored receipts so v3.3 analyses remain readable. */
+  proofContract?: import("./proof-contract").ProofContract;
   truthTarget?: TruthTarget;
   presentationDepth: PresentationDepth;
   budget: AnalysisBudget;

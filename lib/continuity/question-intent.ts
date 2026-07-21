@@ -7,6 +7,7 @@ export type ContinuityQuestionIntent =
   | "repair_plan"
   | "verification_plan"
   | "source_authority"
+  | "fact_lookup"
   | "general";
 
 /** Normalize punctuation so quoted names and typographic apostrophes do not
@@ -54,6 +55,8 @@ export function inferContinuityQuestionIntent(value: string): ContinuityQuestion
   if (/\b(?:who|what|which) does .+ mean\b/.test(question)
     || /\bwho is\b/.test(question)
     || /\bwhich (?:person|character|one)\b/.test(question)
+    || /^which .+ is this\b/.test(question)
+    || /^tell me about\b/.test(question)
     || /\b(?:same person|same character|same entity|multiple people|multiple characters)\b/.test(question)) {
     return "identity";
   }
@@ -66,11 +69,27 @@ export function inferContinuityQuestionIntent(value: string): ContinuityQuestion
     return "source_authority";
   }
   if (/\b(?:can|could|will|would|may)\b/.test(question)
-    && /\b(?:happen|occur|reach|earn|afford|fund|pay|save|unlock|complete|achieve|trigger)\b/.test(question)) {
+    && /\b(?:happen|occur|reach|earn|afford|fund|funded|funding|pay|save|unlock|complete|achieve|trigger)\b/.test(question)) {
     return "reachability";
   }
   if (/\b(?:prerequisite|dependency|dependencies|must happen|reachable|reachability|producer|trigger|unlock)\b/.test(question)) {
     return "reachability";
+  }
+  if (/^why\b/.test(question)
+    || /\b(?:prevents?|blocks?|enables?|feasible|feasibility|mechanism|causal|causality|chain|pathway)\b/.test(question)) {
+    return "reachability";
+  }
+  // A bounded factual lookup is not a causal audit merely because the router
+  // has access to implementation, test, and history lanes. Keep ordinary
+  // questions about one value, place, date, status, or count on the smallest
+  // sufficient route. Negative and exhaustive wording is handled separately
+  // by the proof contract because it changes what coverage is required, not
+  // what the user is asking about.
+  const boundedFactShape = /^(?:where|when|how many|how much)\b/.test(question)
+    || (/^(?:what|which|is|are|does|do|did|has|have)\b/.test(question)
+      && /\b(?:configured|configuration|setting|value|limit|threshold|price|cost|date|status|implemented|implementation|runtime|handler|function|executes?|writes?|test|tested|verification|result|pass|fail|observed|recorded|measured|reported|count|number|amount|location)\b/.test(question));
+  if (boundedFactShape) {
+    return "fact_lookup";
   }
   return "general";
 }

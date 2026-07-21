@@ -21,6 +21,7 @@ import {
   boundaryCoversMaterialClaimKind,
   verifyCompletenessBoundary,
 } from "../completeness-boundary";
+import { compileProofContract } from "../proof-contract";
 
 export type AuthorityRoutingResult = {
   evidence: EvidenceChunk[];
@@ -40,8 +41,9 @@ export function routeEvidence(
   let excludedEvaluation = 0;
   let inactiveSuperseded = 0;
 
-  const mode = analysisMode(request);
-  const claimKinds = requestedClaimKinds(request, mode);
+  const proofContract = compileProofContract(request);
+  const mode = proofContract.mode;
+  const claimKinds = requestedClaimKinds(request, proofContract.claimKinds);
   const presentationDepth = presentationDepthFor(mode, claimKinds);
   const budget = analysisBudgetFor(mode, presentationDepth, policy);
   const boundedRetrievalPlan = boundRetrievalPlan(retrievalPlan, budget);
@@ -114,6 +116,8 @@ export function routeEvidence(
     budget.maxEvidence,
     request.storyPosition,
     request.temporalAxis,
+    request.targetClaimKeys,
+    request.contextRefs,
   );
   const selectedAdmissibleEvidence = selected.filter((chunk) => !isQuarantinedEvidence(chunk));
   const selectedByRole = countByRole(selectedAdmissibleEvidence);
@@ -201,6 +205,7 @@ export function routeEvidence(
       policyId: policy.id,
       policyVersion: policy.version,
       mode,
+      proofContract,
       truthTarget: request.truthTarget ?? "project_truth",
       presentationDepth,
       budget,
@@ -231,8 +236,9 @@ export function planRetrieval(
   request: QueryRequest,
   policy: AuthorityPolicy = DEFAULT_AUTHORITY_POLICY,
 ): RetrievalPlan {
-  const mode = analysisMode(request);
-  const claimKinds = requestedClaimKinds(request, mode);
+  const proofContract = compileProofContract(request);
+  const mode = proofContract.mode;
+  const claimKinds = requestedClaimKinds(request, proofContract.claimKinds);
   const presentationDepth = presentationDepthFor(mode, claimKinds);
   const budget = analysisBudgetFor(mode, presentationDepth, policy);
   const base = request.proposedChange?.trim()
@@ -244,35 +250,35 @@ export function planRetrieval(
       roles: ["intent", "decision", "reference", "asset"],
       claimKinds: ["identity", "normative", "causal"],
       purpose: "Find governing intent, accepted decisions, identity definitions, exclusions, scope, and authority limits.",
-      include: claimKinds.some((kind) => ["identity", "normative", "causal"].includes(kind)) || mode !== "answer_question",
+      include: proofContract.retrievalLanes.includes("authority"),
     },
     {
       id: "declared_state",
       roles: ["configuration", "decision", "intent"],
       claimKinds: ["configured", "normative", "causal"],
       purpose: "Find declared values, registries, prerequisites, ownership, resource limits, and configured state.",
-      include: claimKinds.some((kind) => ["configured", "normative", "causal"].includes(kind)) || mode !== "answer_question",
+      include: proofContract.retrievalLanes.includes("declared_state"),
     },
     {
       id: "execution",
       roles: ["implementation", "configuration", "observation"],
       claimKinds: ["implemented", "observed", "causal"],
       purpose: "Find executable mechanisms, ordering, authorization checks, state mutations, transfers, and downstream consumers.",
-      include: claimKinds.some((kind) => ["implemented", "observed", "causal"].includes(kind)) || mode !== "answer_question",
+      include: proofContract.retrievalLanes.includes("execution"),
     },
     {
       id: "verification",
       roles: ["test", "observation", "implementation"],
       claimKinds: ["tested", "observed", "implemented", "causal"],
       purpose: "Find tests, assertions, observed runs, failures, counterevidence, and verification gaps.",
-      include: claimKinds.some((kind) => ["tested", "observed", "implemented", "causal"].includes(kind)) || mode !== "answer_question",
+      include: proofContract.retrievalLanes.includes("verification"),
     },
     {
       id: "change_history",
       roles: ["proposal", "archive", "observation", "decision"],
       claimKinds: ["historical", "normative", "causal"],
       purpose: "Find proposals, superseded material, prior states, migrations, and historical alternatives without treating them as active truth.",
-      include: claimKinds.includes("historical") || mode === "evaluate_change",
+      include: proofContract.retrievalLanes.includes("change_history"),
     },
   ];
   return {
@@ -294,34 +300,9 @@ export function authorityWeight(
   return policy.authorityWeights[authority] ?? 0;
 }
 
-function analysisMode(request: QueryRequest): AnalysisMode {
-  return inferMinimumAnalysisMode(
-    request.question,
-    request.proposedChange,
-    request.analysisMode ?? "answer_question",
-  );
-}
-
-function requestedClaimKinds(request: QueryRequest, mode: AnalysisMode): ClaimKind[] {
+function requestedClaimKinds(request: QueryRequest, contractClaimKinds: ClaimKind[]): ClaimKind[] {
   const requested = request.claimKinds ?? [];
-  if (mode === "evaluate_change") {
-    return ["identity", "normative", "configured", "implemented", "tested", "observed", "causal", "historical"];
-  }
-  // Dependency edges are only meaningful when their actors and targets resolve
-  // to the right entities. Keep identity evidence in every trace instead of
-  // asking the validator to check identity after retrieval has excluded it.
-  if (mode === "trace_dependencies") return ["identity", "configured", "implemented", "tested", "observed", "causal"];
-  const focused = inferFocusedClaimKinds(request.question);
-  if (focused) return [...new Set([...focused, ...requested])];
-  // Ordinary questions still need the complete active truth boundary. In
-  // particular, configuration, verification, and causal mechanism must not be
-  // silently skipped merely because the caller did not select a specialist
-  // analysis mode. Historical material remains opt-in through an explicit
-  // claim kind or change analysis.
-  return [...new Set([
-    "identity", "normative", "configured", "implemented", "tested", "observed", "causal",
-    ...requested,
-  ] as ClaimKind[])];
+  return [...new Set([...contractClaimKinds, ...requested])];
 }
 
 /**
@@ -336,23 +317,12 @@ export function inferMinimumAnalysisMode(
   proposedChange?: string | null,
   requested: AnalysisMode = "answer_question",
 ): AnalysisMode {
-  const normalized = `${question}\n${proposedChange ?? ""}`.trim().replace(/\s+/g, " ").toLowerCase();
-  const requestedRank: Record<AnalysisMode, number> = {
-    answer_question: 0,
-    trace_dependencies: 1,
-    evaluate_change: 2,
-  };
-  let minimum: AnalysisMode = "answer_question";
-  if (proposedChange?.trim() || /\b(?:what breaks|blast radius|if (?:we |i )?(?:change|remove|replace|add|move)|proposed change|revise canon|retcon)\b/.test(normalized)) {
-    minimum = "evaluate_change";
-  } else if (
-    /\b(?:must happen|depends?|dependencies|prerequisites?|trigger|producer|consumer|reachable|reachability|causality|causal|cause|consequences?|impact|authorization|authorize|permission|idempotent|before|after|why|prevents?|blocks?|enables?|feasible|feasibility|mechanism|trace|chain|pathway)\b/.test(normalized)
-    || /\bcan .{1,160}\b(?:pay|reach|unlock|occur|happen|appear|fit|survive|succeed|fail)\b/.test(normalized)
-    || /\b(?:how|explain) .{1,180}\b(?:happen|work|fail|succeed|reach|cause|produce|prevent|transition|settle|complete|link|flow)\b/.test(normalized)
-  ) {
-    minimum = "trace_dependencies";
-  }
-  return requestedRank[requested] >= requestedRank[minimum] ? requested : minimum;
+  return compileProofContract({
+    projectId: "route-probe",
+    question,
+    proposedChange,
+    analysisMode: requested,
+  }).mode;
 }
 
 /**
@@ -361,23 +331,9 @@ export function inferMinimumAnalysisMode(
  * speed must not be purchased by silently omitting a material claim plane.
  */
 export function inferFocusedClaimKinds(question: string): ClaimKind[] | null {
-  const normalized = question.trim().replace(/\s+/g, " ");
-  if (!normalized || normalized.length > 400) return null;
-
-  const relationIdentity = /^how (?:is|are) .{1,160} related to\b/i.test(normalized);
-  const directIdentity = /^(?:who (?:is|are) (?!responsible\b|allowed\b|authorized\b|able\b|required\b)|which .{1,80} (?:is this|does this (?:show|depict|refer to))\b|what does .{1,100} refer to\b|what (?:person|character|entity|asset|location) (?:is|does)\b)/i.test(normalized);
-  const aboutEntity = /^tell me about\s+.{1,120}[?.!]?$/i.test(normalized);
-  const causalSignal = /\b(?:can|could|would|should|why|possible|reachable|trigger|cause|consequence|impact|dependency|depends|change|break|conflict|pay|fund|producer|consumer|before|after|permission|authorize|outcome)\b/i.test(normalized);
-  if (relationIdentity || directIdentity || (aboutEntity && !causalSignal)) return ["identity"];
-
-  if (!causalSignal) {
-    const explicitKinds: ClaimKind[] = [];
-    if (/\b(?:configured|configuration|setting|declared value)\b/i.test(normalized)) explicitKinds.push("configured");
-    if (/\b(?:implemented|implementation|runtime|executes?|handler|writer)\b/i.test(normalized)) explicitKinds.push("implemented");
-    if (/\b(?:tested|test result|verified|verification|passes?|fails?)\b/i.test(normalized)) explicitKinds.push("tested");
-    if (explicitKinds.length) return [...new Set(explicitKinds)];
-  }
-  return null;
+  if (!question.trim() || question.length > 400) return null;
+  const contract = compileProofContract({ projectId: "route-probe", question });
+  return contract.routeClass === "lookup" ? contract.claimKinds : null;
 }
 
 export function presentationDepthFor(mode: AnalysisMode, claimKinds: ClaimKind[]): PresentationDepth {
@@ -398,7 +354,7 @@ export function analysisBudgetFor(
   if (mode === "answer_question" && presentationDepth === "focused") {
     return {
       profile: "answer_focused",
-      maxRetrievalLanes: bounded(1, policy.maxRetrievalLanes),
+      maxRetrievalLanes: bounded(2, policy.maxRetrievalLanes),
       maxResultsPerLane: bounded(6, policy.maxResultsPerLane),
       maxEvidence: bounded(8, policy.maxEvidence),
       maxCompilerPasses: 1,
@@ -513,11 +469,13 @@ function laneBalancedSelection(
   maxEvidence: number,
   storyPosition?: number,
   temporalAxis?: string | null,
+  targetClaimKeys: string[] = [],
+  contextRefs: string[] = [],
 ): EvidenceChunk[] {
   const relevant = evidence
     .filter((chunk) => (chunk.claimKinds ?? []).some((kind) => claimKinds.includes(kind)));
   const rank = (items: EvidenceChunk[]) => items.sort((a, b) =>
-    routingScore(b, claimKinds, policy) - routingScore(a, claimKinds, policy)
+    routingScore(b, claimKinds, policy, targetClaimKeys, contextRefs) - routingScore(a, claimKinds, policy, targetClaimKeys, contextRefs)
       || b.score - a.score
       || a.id.localeCompare(b.id));
   const admissibleRanked = rank(relevant.filter((chunk) => !isQuarantinedEvidence(chunk)));
@@ -554,8 +512,8 @@ function laneBalancedSelection(
   }
   const contradictoryGroups = [...claimGroups.values()]
     .filter((group) => new Set(group.map((chunk) => chunk.polarity)).size > 1)
-    .sort((a, b) => Math.max(...b.map((chunk) => routingScore(chunk, claimKinds, policy)))
-      - Math.max(...a.map((chunk) => routingScore(chunk, claimKinds, policy))));
+    .sort((a, b) => Math.max(...b.map((chunk) => routingScore(chunk, claimKinds, policy, targetClaimKeys, contextRefs)))
+      - Math.max(...a.map((chunk) => routingScore(chunk, claimKinds, policy, targetClaimKeys, contextRefs))));
   for (const group of contradictoryGroups) {
     const polarities = new Set(group.map((chunk) => chunk.polarity));
     const pair: EvidenceChunk[] = [];
@@ -573,17 +531,37 @@ function laneBalancedSelection(
   }
 
   return [...selected.values()].sort((a, b) =>
-    routingScore(b, claimKinds, policy) - routingScore(a, claimKinds, policy)
+    routingScore(b, claimKinds, policy, targetClaimKeys, contextRefs) - routingScore(a, claimKinds, policy, targetClaimKeys, contextRefs)
       || b.score - a.score
       || a.id.localeCompare(b.id)).slice(0, maxEvidence);
 }
 
-function routingScore(chunk: EvidenceChunk, claimKinds: ClaimKind[], policy: AuthorityPolicy): number {
+function routingScore(
+  chunk: EvidenceChunk,
+  claimKinds: ClaimKind[],
+  policy: AuthorityPolicy,
+  targetClaimKeys: string[] = [],
+  contextRefs: string[] = [],
+): number {
   const relevance = Number.isFinite(chunk.score) ? Math.max(0, Math.min(1, chunk.score)) : 0;
   const authority = chunk.authorityRank ?? normalizedAuthority(chunk, policy);
   const role = chunk.role ?? "reference";
   const roleFit = Math.max(0, ...claimKinds.map((kind) => policy.roleWeightsByClaimKind[kind]?.[role] ?? 0));
-  return relevance * 0.6 + authority * 0.25 + roleFit * 0.15;
+  const normalizedTargets = new Set(targetClaimKeys.map(normalizedRouteKey).filter(Boolean));
+  const targetFit = chunk.claimKey && normalizedTargets.has(normalizedRouteKey(chunk.claimKey)) ? 1 : 0;
+  const normalizedRefs = contextRefs.map(normalizedRouteKey).filter(Boolean);
+  const locator = normalizedRouteKey(chunk.locator);
+  const sourceId = normalizedRouteKey(chunk.sourceId);
+  const contextFit = normalizedRefs.some((ref) => ref === locator || ref === sourceId || locator.includes(ref)) ? 1 : 0;
+  // Server-resolved exact targets and explicit context references outrank
+  // semantic similarity. They do not establish truth; they only prevent a
+  // large repository from crowding the requested proof object out of its
+  // bounded evidence capsule.
+  return relevance * 0.6 + authority * 0.25 + roleFit * 0.15 + targetFit * 0.75 + contextFit * 0.5;
+}
+
+function normalizedRouteKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function normalizedAuthority(chunk: EvidenceChunk, policy: AuthorityPolicy): number {

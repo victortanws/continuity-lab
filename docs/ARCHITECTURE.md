@@ -58,6 +58,18 @@ schema, restores omitted invariant fields, and runs the ordinary validator.
 It is an economy path, not a weaker trust path. Change, causality, conflict, and
 reachability questions retain the full bounded route.
 
+Authority Router v3.4 compiles a domain-neutral proof contract before retrieval.
+The contract separates a lookup, scoped-state question, causal transition, and
+change proposal; names the proof and closure each requires; and caps citations.
+Direct positive lookups therefore stop after decisive local evidence instead of
+inheriting a repository-wide closure checklist. Negative or exhaustive
+questions still require a bounded corpus, while causal targets still require a
+trusted transition certificate. Exact target claim keys and explicit context
+references outrank semantic similarity inside the fixed evidence budget.
+Deferred material remains visible in the coverage receipt, so long repositories
+gain a small question-specific context capsule without losing revision-wide
+omission state.
+
 Routing depth is enforced on the server. Client-supplied claim-kind hints may
 broaden a route but may not narrow the server's minimum evidence boundary. A
 query has one bounded retrieval fan-out, no more than one compilation call, no

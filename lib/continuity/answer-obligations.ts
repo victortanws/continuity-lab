@@ -34,6 +34,7 @@ export function compileAnswerObligations(
   ].map(normalizedToken).filter(Boolean))];
   const obligationEvidenceIds = [...new Set(trustedReachability?.obligations?.flatMap((item) => item.evidenceIds) ?? [])];
   const full = route.presentationDepth === "full";
+  const proof = route.proofContract;
   const obligations: AnswerObligation[] = [
     obligation("direct_answer", true, "answer", "Answer the current question before optional audit detail.", route.claimKinds),
     obligation("truth_and_verdict", true, "answer", "Keep answer support separate from the proposition's truth state.", route.claimKinds),
@@ -53,14 +54,20 @@ export function compileAnswerObligations(
       route.claimKinds,
       targetClaimKeys,
     ),
-    obligation(
+  ];
+
+  // A direct positive lookup needs a decisive citation, not an exhaustive
+  // audit of everything that was not retrieved. Closure becomes material for
+  // negative/exhaustive, causal, scoped-authority, and change questions.
+  if (!proof || proof.closureDemand !== "local") {
+    obligations.push(obligation(
       "coverage_closure",
       true,
       route.coverage.closure === "closed" && !full ? "receipt" : "answer",
       "Report evidence coverage independently from source authority or proposition status.",
       route.claimKinds,
-    ),
-  ];
+    ));
+  }
 
   if (route.claimKinds.includes("identity") || entityEvidenceIds.length) {
     obligations.push(obligation(
@@ -74,7 +81,7 @@ export function compileAnswerObligations(
     ));
   }
 
-  if (route.mode !== "answer_question" || targetClaimKeys.length || trustedReachability?.obligations?.length) {
+  if (proof?.dependenciesRequired || (!proof && route.mode !== "answer_question") || targetClaimKeys.length || trustedReachability?.obligations?.length) {
     obligations.push(obligation(
       "dependency_inventory",
       true,
@@ -86,7 +93,7 @@ export function compileAnswerObligations(
     ));
   }
 
-  if (route.mode === "trace_dependencies" || targetClaimKeys.length) {
+  if (proof?.transitionCertificateRequired || (!proof && route.mode === "trace_dependencies") || targetClaimKeys.length) {
     obligations.push(obligation(
       "reachability_certificate",
       true,

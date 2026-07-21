@@ -111,6 +111,87 @@ the current [OpenAI Apps SDK connection guide](https://developers.openai.com/app
 - **Reachability:** whether the required steps can really produce an outcome,
   not merely whether the outcome is mentioned somewhere.
 
+## Autonomous game development
+
+Continuity Lab can already act as a read-only reviewer and planning layer for a
+game-development agent. It can pin the version being changed, find relevant
+story and implementation evidence, keep similarly named characters separate,
+distinguish a design promise from working code, trace a trusted transition
+graph, analyze a proposed change without calling it canon, and return cited
+blockers and validation work. This is useful today because an agent can ask
+before it writes: “Is this beat possible now?”, “What must be true first?”,
+“What later material relies on this state?”, and “Which tests and assets must
+change with it?”
+
+It is not yet an autonomous game builder by itself. For an arbitrary project,
+natural-language files do not automatically become a complete executable
+simulation. The current public MCP also cannot edit a repository or approve
+canon. Without a trusted transition adapter, it can identify stated
+relationships and possible gaps, but it must keep full reachability unknown.
+
+### A safe agent loop
+
+1. Pin the current repository revision and its complete file manifest.
+2. Ask Continuity Lab for the relevant characters, rules, state, triggers,
+   implementation, tests, and unresolved facts.
+3. Generate several candidate beats or scenarios in a proposal namespace.
+4. Analyze each candidate for prerequisites, resource limits, identity and time
+   conflicts, downstream scenes, tests, UI, and art.
+5. Reject candidates with established conflicts. Keep uncertain candidates
+   clearly labeled, and rank valid candidates for novelty, dramatic value,
+   implementation cost, and review risk.
+6. Give the director a small choice set with citations and the smallest required
+   code, data, test, and asset changes.
+7. After human approval and implementation, sync a new immutable revision and
+   verify the resulting behavior before promotion.
+
+That loop reduces review cost by moving routine consistency checks earlier and
+showing the director only material choices and uncertainties. It does not try
+to remove the director: novelty remains generated, while truth and approval
+remain constrained and reviewable.
+
+### Applying this to Vibe Code Simulator
+
+The current reviewed adapter already separates several facts that a naive agent
+could easily collapse: earning cash, having enough cash, paying $47,000, saving
+the operation-funded state, and unlocking Grandma's recovery scene. That makes
+it useful for diagnosing the existing prototype and drafting a development
+plan.
+
+To let an agent generate playable days and story beats reliably, VCS should add
+a reviewed machine-readable transition registry for each important event:
+stable event and character IDs, earliest/latest day, prerequisites, actor
+knowledge, cash/energy/time costs, ordered state changes, repeat limits,
+downstream consumers, tests, and asset requirements. The story document stays
+the narrative authority; the transition registry supplies executable semantics;
+the code and tests prove what is actually implemented. Continuity Lab can then
+search the whole pinned repository, build only the proof slice needed for the
+current question, and reject or repair a candidate that cannot reach the
+promised ending.
+
+Once that adapter exists, an agent could generate plausible intermediate days
+that preserve canon while steering the economy toward the operation, propose
+alternative investment outcomes, schedule character encounters, produce
+implementation and test tasks, and prepare art briefs for approved beats. The
+director would review the meaningful creative alternatives and unresolved
+trade-offs instead of rechecking every fact by hand.
+
+### A possible funded product path
+
+A later repository integration could turn the existing **What to build next**
+result into a controlled implementation action. Continuity Lab would first
+offer several canon-compatible feature plans. Each plan would include its story
+purpose, affected files and state, tests, art requirements, estimated review
+risk, and unresolved assumptions. Only the creator-approved plan would be sent
+to a coding or asset agent. The resulting branch would then be re-ingested and
+audited before a person promotes it.
+
+At team or enterprise scale, the same protocol can support roles, approvals,
+private repositories, policy-owned source authority, change histories, review
+queues, and audit receipts. The model and agent can vary by organization; the
+stable layer is the evidence, entity, proof, proposal, approval, and revision
+protocol. This is a roadmap, not a capability claimed by the current MVP.
+
 ## How we collaborated with Codex
 
 This project was developed as a long-running collaboration between the product
@@ -293,13 +374,14 @@ flattened into misleading edges. This is not yet a durable whole-corpus
 knowledge graph, alternative-path solver, or automatic natural-language
 causality theorem prover.
 
-### v3.2 to v3.3 compatibility
+### Router v3.4 compatibility
 
 The public transport remains MCP `2025-06-18`, and its stable data contract is
-`continuity.mcp.v1`. Authority-router version `3.3.0` is advertised separately
+`continuity.mcp.v1`. Authority-router version `3.4.0` is advertised separately
 as namespaced tool metadata, so router changes do not rename tools or resource
 identities. The three v3.2 reviewed-sample tools keep their existing names,
-inputs, and output shape; v3.3 adds the two context tools. Tests exercise
+inputs, and output shape; v3.3 added the two context tools, while v3.4 adds a
+server-authored proof contract and target-prioritized context capsule. Tests exercise
 initialization, all five descriptors, the original VCS calls, exact upload
 verification, anonymous commit pinning, and the $47,000 regression. Clients
 should branch on advertised capabilities and `contractVersion`, not parse the

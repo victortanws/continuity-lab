@@ -80,7 +80,7 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
     assert.deepEqual(tool.securitySchemes, [{ type: "noauth" }]);
     assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
     assert.equal(tool._meta["continuity/contractVersion"], "continuity.mcp.v1");
-    assert.equal(tool._meta["continuity/routerVersion"], "3.3.0");
+    assert.equal(tool._meta["continuity/routerVersion"], "3.4.0");
     if (tool.inputSchema.properties.projectId) {
       assert.equal(tool.inputSchema.properties.projectId.maxLength, 128);
     }
@@ -148,7 +148,7 @@ test("uploaded text is exact-span verified through the keyless MCP context tool"
 
   assert.equal(compiled.body.result.isError, false);
   assert.equal(compiled.body.result.structuredContent.contractVersion, "continuity.mcp.v1");
-  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.3.0");
+  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.4.0");
   assert.equal(compiled.body.result.structuredContent.coverage.completeForProjectCorpus, false);
   assert.equal(compiled.body.result.structuredContent.claims.length, 2);
   assert.equal(compiled.body.result.structuredContent.entities.every((entity) => entity.resolution === "ambiguous"), true);

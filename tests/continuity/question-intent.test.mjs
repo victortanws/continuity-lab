@@ -16,6 +16,9 @@ test("question intent routing is punctuation-tolerant and domain-neutral", () =>
   assert.equal(inferContinuityQuestionIntent("Which tests prove the migration runs exactly once?"), "verification_plan");
   assert.equal(inferContinuityQuestionIntent("Which records support this answer?"), "source_authority");
   assert.equal(inferContinuityQuestionIntent("Is this portrait showing the correct person?"), "visual_binding");
+  assert.equal(inferContinuityQuestionIntent("What value is configured for the retry limit?"), "fact_lookup");
+  assert.equal(inferContinuityQuestionIntent("What is true now?"), "general");
+  assert.equal(inferContinuityQuestionIntent("Why did settlement fail?"), "reachability");
 });
 
 test("browser analysis modes follow the shared intent instead of a second classifier", () => {
