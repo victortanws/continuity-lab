@@ -294,6 +294,24 @@ The project uses the existing vinext/Sites build and does not use
 address into ChatGPT. The same implementation is also available at `/mcp` on
 compatible direct-worker and local hosts.
 
+### Run the presenter-owned GPT-5.6 API example
+
+The public page deliberately uses the reviewed deterministic answer. To compare
+that answer with one real model run on your own API account, keep the key in your
+terminal environment and run the bounded presenter script:
+
+```bash
+export OPENAI_API_KEY="your_api_key_here"
+npm run demo:api
+```
+
+The script calls the existing Continuity Lab reasoner with `gpt-5.6-sol`, the
+same frozen Vibe Code Simulator question and evidence scope, one provider-call
+budget, and a 60-second deadline. It prints the structured verdict, citations,
+entities, dependencies, and reachability result as JSON. It does not place the
+key in browser code, commit it to Git, or make the public website spendable by
+anonymous visitors.
+
 To connect a deployed build to ChatGPT, follow the current
 [OpenAI Apps SDK connection guide](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt).
 `localhost` is useful for development, but a remote ChatGPT client needs a
@@ -795,6 +813,7 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 - `npm run dev`: start local development
 - `npm run build`: verify the vinext build output
 - `npm test`: build the application and run the rendered and continuity suites
+- `npm run demo:api`: run the bounded presenter-owned GPT-5.6 comparison (requires `OPENAI_API_KEY`)
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
 ### Learn More

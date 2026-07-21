@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render() {
@@ -20,9 +21,19 @@ test("server-renders the Continuity Lab MVP", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
   assert.match(html, /Continuity Lab/);
-  assert.match(html, /Find story problems/);
+  assert.match(html, /Towards a new paradigm in/);
+  assert.match(html, /game development and continuity/);
   assert.match(html, /How it works/);
-  assert.match(html, /Show the example/);
+  assert.match(html, /Continuity for your longer form narrative projects, grounded in your own materials\./);
+  assert.match(html, /DETERMINISTIC WORKED EXAMPLE/);
+  assert.match(html, /Repository selected: Vibe Code Simulator/);
+  assert.match(html, /Founder promises to pay/);
+  assert.match(html, /his grandmother/);
+  assert.match(html, /Connect to ChatGPT/);
+  assert.match(html, /Try your material/);
+  assert.match(html, /Try a repository/);
+  assert.match(html, /continuity-lab-plugin-icon\.png/);
+  assert.match(html, /Guide autonomous development/);
   assert.match(html, /Vibe Code Simulator/);
   assert.match(html, /No\. The current prototype cannot earn or pay the \$47,000/);
   assert.match(html, /What the question refers to/);
@@ -34,8 +45,27 @@ test("server-renders the Continuity Lab MVP", async () => {
   assert.doesNotMatch(html, /causal edges/i);
   assert.doesNotMatch(html, /Slap the Heavens/);
   assert.doesNotMatch(html, /Grandma Asset Record/);
+  assert.doesNotMatch(html, /How should this document be read/);
+  assert.doesNotMatch(html, /Use my files/);
+  assert.doesNotMatch(html, /Show the example/);
+  assert.doesNotMatch(html, /open-ended API playground/);
+  assert.doesNotMatch(html, /CONTROLLED API DEMONSTRATION/);
+  assert.doesNotMatch(html, /VIDEO PLACEHOLDER/);
+  assert.doesNotMatch(html, /Upload up to 12 sources/);
+  assert.doesNotMatch(html, /Public repository URL/);
+  assert.doesNotMatch(html, /Run this exact question live/);
   assert.doesNotMatch(html, /demo evaluator active/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
+});
+
+test("the ChatGPT panel exposes the dependency-tracing demonstration", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /Trace every dependency required before Grandma/);
+  assert.match(source, /The MCP returns the same cited entities and dependency chain/);
+  assert.match(source, /continuity-lab-plugin-icon\.png/);
+  assert.match(source, /Bring a file into ChatGPT—not into this website/);
+  assert.match(source, /Ask about a public GitHub repository in ChatGPT/);
+  assert.match(source, /visitors cannot spend the creator/);
 });
 
 test("the built worker exposes the Sites-compatible MCP alias", async () => {

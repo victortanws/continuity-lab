@@ -217,7 +217,6 @@ export default function Home() {
   const [analysisReceipt, setAnalysisReceipt] = useState<AnalysisReceipt | null>(REVIEWED_EXAMPLE_RECEIPT);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadDocumentType, setUploadDocumentType] = useState<UploadDocumentType>("narrative");
   const [engineMode, setEngineMode] = useState<EngineMode>("demonstration");
   const [answer, setAnswer] = useState<UiAnswer>(REVIEWED_EXAMPLE_ANSWER);
   const [sources, setSources] = useState<StoredSource[]>([]);
@@ -237,15 +236,6 @@ export default function Home() {
     : workspaceEvidenceCount
       ? `Your project · ${workspaceEvidenceCount} source item${workspaceEvidenceCount === 1 ? "" : "s"}`
       : "Your project · add files to begin";
-  const canRunReviewedLive = Boolean(
-    analysisReceipt
-    && analysisReceipt.projectMode === "sample"
-    && analysisReceipt.question === DEFAULT_QUESTION
-    && analysisReceipt.timeScope === REVIEWED_EXAMPLE_RECEIPT.timeScope
-    && analysisReceipt.temporalAxis === "day"
-    && analysisReceipt.storyPosition === 8
-    && analysisReceipt.targetPosition === 8,
-  );
   const canDownloadWorkspaceResults = Boolean(
     hasAnalyzed
     && analysisReceipt?.projectMode === "workspace"
@@ -390,7 +380,7 @@ export default function Home() {
         const form = new FormData();
         form.set("projectId", WORKSPACE_PROJECT_ID);
         form.set("projectTitle", "Continuity Lab workspace");
-        form.set("documentType", uploadDocumentType);
+        form.set("documentType", "narrative");
         form.set("file", file);
         const response = await fetch("/api/continuity/sources", { method: "POST", body: form });
         const payload = await response.json() as { source?: StoredSource; capability?: string; message?: string; error?: string };
@@ -404,7 +394,7 @@ export default function Home() {
       if (stored) setProjectMode("workspace");
       showToast(failures.length
         ? `${stored} stored · ${failures.length} rejected${ignored ? ` · ${ignored} beyond the 12-file limit` : ""}: ${failures[0]}`
-        : `${stored} source${stored === 1 ? "" : "s"} stored as ${uploadDocumentType} evidence${ignored ? ` · ${ignored} beyond the 12-file limit were not sent` : ""}`);
+        : `${stored} source${stored === 1 ? "" : "s"} stored as project material${ignored ? ` · ${ignored} beyond the 12-file limit were not sent` : ""}`);
       return stored > 0;
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Upload failed.");
@@ -505,13 +495,10 @@ export default function Home() {
     void analyze(nextQuestion, "demo", receipt);
   }
 
-  function selectWorkspace() {
-    setProjectMode("workspace");
-    setHasAnalyzed(false);
-    setAnalysisReceipt(null);
-    setAnswer(EMPTY_ANSWER);
-    setEngineMode("ready");
-    setShowFullTrace(false);
+  function openChatGPTPath(panel: SourcePanel = "mcp") {
+    setProjectMode("sample");
+    setSourcePanel(panel);
+    window.requestAnimationFrame(() => document.getElementById("sources")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
   function toggleTheme() {
@@ -534,7 +521,7 @@ export default function Home() {
   return (
     <main data-theme={theme}>
       <nav className="topbar">
-        <a className="brand" href="#top" aria-label="Continuity Lab home"><span className="brand-mark"><Icon name="branch" size={18}/></span><span>Continuity <i>Lab</i></span></a>
+        <a className="brand" href="#top" aria-label="Continuity Lab home"><img className="brand-logo" src="/continuity-lab-plugin-icon.png" alt=""/><span>Continuity <i>Lab</i></span></a>
         <div className="nav-status"><span className="status-dot"/><span>{sourceLabel}</span></div>
         <div className="nav-actions"><a href="#sources">How it works</a><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}><Icon name={theme === "dark" ? "sun" : "moon"} size={15}/><span>{theme === "dark" ? "Light" : "Dark"}</span></button>{canDownloadWorkspaceResults && <button onClick={exportTrace}><Icon name="download" size={15}/> Download my results</button>}</div>
       </nav>
@@ -543,20 +530,21 @@ export default function Home() {
         <div className="hero-image" aria-hidden="true" />
         <div className="hero-inner">
           <div className="hero-copy-block">
-            <div className="eyebrow">STORY QUESTIONS, ANSWERED FROM YOUR OWN MATERIAL</div>
-            <h1>Find story problems<br/><em>before they get expensive.</em></h1>
-            <p>Add your script, notes, or public game repository. Ask what is true, what can happen next, or what else must change if you edit a character, rule, cost, scene, or ending. Continuity Lab answers in plain language and shows the sources it used.</p>
+            <div className="eyebrow">Continuity for your longer form narrative projects, grounded in your own materials.</div>
+            <h1>Towards a new paradigm in<br/><em>game development and continuity.</em></h1>
+            <p>See a reviewed example here, then bring your own script, notes, or public game repository into ChatGPT through the read-only Continuity Lab MCP. Ask what is true, what can happen next, or what else must change—and see the sources behind the answer.</p>
           </div>
 
           <div className="question-card">
-            <div className="mode-row">
-              <button className={projectMode === "sample" ? "active" : ""} onClick={() => showReviewedExample()}><span/> Show the example</button>
-              <button className={projectMode === "workspace" ? "active" : ""} onClick={selectWorkspace}><span/> Use my files</button>
+            <div className="demo-context">
+              <div><span>DETERMINISTIC WORKED EXAMPLE</span></div>
+              <button type="button" onClick={() => { setSourcePanel("sample"); document.getElementById("sources")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}><Icon name="branch" size={14}/> Repository selected: Vibe Code Simulator</button>
+              <p>In the full story, the Founder promises to pay <b>$47,000</b> for his grandmother&apos;s sight-restoring operation. The playable prototype currently covers Days 7–8 and begins with only $700. The question below asks whether the implemented game can actually reach that promised outcome.</p>
             </div>
-            <label htmlFor="continuity-question">Ask about the story or a planned change</label>
+            <label htmlFor="continuity-question">Ask the reviewed Vibe Code Simulator snapshot</label>
             <textarea id="continuity-question" value={question} onChange={(event) => setQuestion(event.target.value)} />
             <div className="question-footer">
-              <div className={`engine-badge ${engineMode}`}><span/>{engineLabel(engineMode, projectMode)}</div>
+              <div className={`engine-badge ${engineMode}`}><span/>{engineLabel(engineMode, projectMode, workspaceEvidenceCount > 0)}</div>
               <button className="primary-button" onClick={() => void analyze()} disabled={isAnalyzing || !question.trim()}>{isAnalyzing ? <span className="spinner"/> : <Icon name="arrow" size={18}/>} {isAnalyzing ? "Checking evidence…" : "Ask"}</button>
             </div>
           </div>
@@ -567,17 +555,16 @@ export default function Home() {
 
       <section className="sources-section" id="sources">
         <div className="section-intro">
-          <div><div className="eyebrow dark">QUICK START</div><h2>How it works</h2></div>
-          <p>Start with the worked example, upload your own files, or connect a public GitHub repository. Ask a question. Continuity Lab finds the relevant material, explains its answer, and suggests what to change when something is missing or inconsistent.</p>
+          <div><div className="eyebrow dark">QUICK START</div><h2>How it works</h2><p>Run the deterministic Vibe Code Simulator example here. To use your own material, <button type="button" className="inline-mcp-link" onClick={() => { setSourcePanel("mcp"); window.requestAnimationFrame(() => document.getElementById("sources")?.scrollIntoView({ behavior: "smooth", block: "start" })); }}>connect the read-only MCP to ChatGPT</button>, attach a file or name an explicit public GitHub repository, and ask the same evidence-grounded questions in conversation.</p></div>
         </div>
 
         <div className="pipeline" aria-label="Continuity Lab processing pipeline">
-          {["Add your material", "Ask a question", "See the answer, sources, and next steps"].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong>{index < 2 && <i>→</i>}</div>)}
+          {["Connect Continuity Lab", "Bring a file or public repository", "Ask and inspect the cited answer"].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong>{index < 2 && <i>→</i>}</div>)}
         </div>
 
         <div className="source-workspace">
           <div className="source-tabs" role="tablist">
-            {(["sample", "upload", "github", "mcp"] as SourcePanel[]).map((tab) => <button key={tab} role="tab" aria-selected={sourcePanel === tab} className={sourcePanel === tab ? "active" : ""} onClick={() => setSourcePanel(tab)}>{tab === "sample" ? "Worked example" : tab === "upload" ? "Upload files" : tab === "github" ? "GitHub repository" : "Use in ChatGPT"}</button>)}
+            {(["sample", "upload", "github", "mcp"] as SourcePanel[]).map((tab) => <button key={tab} role="tab" aria-selected={sourcePanel === tab} className={sourcePanel === tab ? "active" : ""} onClick={() => setSourcePanel(tab)}>{tab === "sample" ? "Worked example" : tab === "upload" ? "Try your material" : tab === "github" ? "Try a repository" : "Connect to ChatGPT"}</button>)}
           </div>
 
           <div className="source-panel">
@@ -585,20 +572,10 @@ export default function Home() {
               <SamplePanel onAsk={showReviewedExample}/>
             )}
             {sourcePanel === "upload" && (
-              <UploadPanel sources={sources} isUploading={isUploading} documentType={uploadDocumentType} setDocumentType={setUploadDocumentType} onChange={addSource} onPaste={addPastedSource}/>
+              <TryMaterialPanel onConnect={() => setSourcePanel("mcp")}/>
             )}
             {sourcePanel === "github" && (
-              <GitHubPanel
-                repository={repository}
-                repositoryUrl={repositoryUrl}
-                repositoryRef={repositoryRef}
-                repositoryScope={repositoryScope}
-                repositoryScopeChoices={repositoryScopeChoices}
-                setRepositoryUrl={(value) => { setRepositoryUrl(value); setRepositoryScope(""); setRepositoryScopeChoices([]); }}
-                setRepositoryRef={(value) => { setRepositoryRef(value); setRepositoryScope(""); setRepositoryScopeChoices([]); }}
-                setRepositoryScope={setRepositoryScope}
-                onSubmit={syncRepository}
-              />
+              <TryRepositoryPanel onConnect={() => setSourcePanel("mcp")}/>
             )}
             {sourcePanel === "mcp" && <McpPanel/>}
           </div>
@@ -608,7 +585,7 @@ export default function Home() {
       <section className={`analysis-section ${hasAnalyzed ? "has-result" : ""}`} id="analysis">
         <div className="section-heading">
           <div><div className="eyebrow dark">ANSWER AND EXPLANATION</div><h2>{hasAnalyzed ? analyzedQuestion : "Your answer will appear here."}</h2></div>
-          <div className="section-heading-actions"><span className={`verdict ${answer.tone}`}><span/>{answer.status}</span>{canRunReviewedLive && <button className="live-test-icon" title="Run this exact question live" aria-label="Run this exact question live with the OpenAI API" onClick={() => void analyze(undefined, "live", analysisReceipt ?? undefined)} disabled={isAnalyzing}><Icon name="code" size={17}/></button>}</div>
+          <div className="section-heading-actions"><span className={`verdict ${answer.tone}`}><span/>{answer.status}</span></div>
         </div>
 
         {engineMode === "unavailable" && <div className="honesty-banner attention"><strong>Live answer unavailable</strong><span>{analysisReceipt?.projectMode === "sample" ? "The reviewed answer is still available. Add the OpenAI API key in Site settings only if you want to run the same question through GPT-5.6." : "Your material is still stored. Add the OpenAI API key in Site settings to search it and answer with GPT-5.6."}</span></div>}
@@ -634,7 +611,7 @@ export default function Home() {
         ) : answer.depth === "focused" && !showFullTrace ? (
           <article className="focused-answer-trace">
             <div><span>KEY CONTEXT</span><strong>{answer.entities.slice(0, 4).map((entity) => entity.name).join(" · ") || "No person or item was identified confidently"}</strong><small>{answer.evidence.slice(0, 3).map((item) => item.title || item.sourceId).join(" · ") || "No supporting source was found"}</small></div>
-            <button type="button" onClick={() => setShowFullTrace(true)}>Show sources and dependencies <Icon name="arrow" size={14}/></button>
+            <button type="button" onClick={() => setShowFullTrace(true)}>Show all sources and dependencies <Icon name="arrow" size={14}/></button>
           </article>
         ) : <>
           <div className="inspection-grid">
@@ -670,28 +647,37 @@ export default function Home() {
       </section>
 
       <section className="build-week-section">
-        <div><div className="eyebrow">FROM QUESTION TO ACTION</div><h2>Know what is true.<br/><em>See what comes next.</em></h2></div>
-        <div className="proof-points"><div><span>01</span><strong>Bring your material</strong><p>Use a script, story bible, notes, or a public repository.</p></div><div><span>02</span><strong>Ask a real question</strong><p>Check a fact, a possible event, a contradiction, or a planned change.</p></div><div><span>03</span><strong>Get useful next steps</strong><p>See the answer, the supporting sources, and the work needed to make the idea fit.</p></div></div>
+        <div><div className="eyebrow">FROM QUESTION TO ACTION</div><h2>Know what is true.<br/><em>See what comes next.</em></h2><p className="future-intro">Today Continuity Lab answers and traces in read-only mode. The longer-term opportunity is an agent preflight: plan against project truth, make a bounded change, then verify every affected dependency before shipping.</p></div>
+        <div className="proof-points"><div><span>01</span><strong>Bring your material</strong><p>Use a script, story bible, notes, or a public repository.</p></div><div><span>02</span><strong>Ask a real question</strong><p>Check a fact, possible event, contradiction, dependency, or planned change.</p></div><div><span>03</span><strong>Get useful next steps</strong><p>See the answer, supporting sources, and work needed to make the idea fit.</p></div><div><span>04 · FUTURE</span><strong>Guide autonomous development</strong><p>Give coding and narrative agents a grounded stop/go contract, then re-check downstream effects after every edit.</p></div></div>
       </section>
 
-      <footer><div className="brand"><span className="brand-mark"><Icon name="branch" size={18}/></span><span>Continuity <i>Lab</i></span></div><p>Keep every story change grounded in what came before.</p><button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top ↑</button></footer>
+      <footer><div className="brand"><img className="brand-logo" src="/continuity-lab-plugin-icon.png" alt=""/><span>Continuity <i>Lab</i></span></div><p>Keep every story change grounded in what came before.</p><button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top ↑</button></footer>
       {toast && <div className="toast"><Icon name="check" size={16}/>{toast}</div>}
     </main>
   );
 }
 
 function SamplePanel({ onAsk }: { onAsk: (question?: string) => void }) {
-  return <div className="sample-panel"><div className="source-symbol coral"><Icon name="branch" size={23}/></div><div><span className="panel-kicker">WORKED EXAMPLE</span><h3>Vibe Code Simulator</h3><p>The full story promises that the Founder will eventually pay $47,000 for Grandma&apos;s operation. The playable prototype currently covers only Days 7–8, starts with $700, and cannot reach that outcome. Choose a question to see exactly where the implemented story stops and what a later chapter must add.</p><div className="sample-question-list">{SUGGESTED_QUESTIONS.map((question) => <button key={question} onClick={() => onAsk(question)}>{question}<Icon name="arrow" size={14}/></button>)}</div></div><button className="outline-button" onClick={() => onAsk()}>Show the main answer <Icon name="arrow" size={16}/></button></div>;
+  return <div className="sample-panel"><div className="source-symbol coral"><Icon name="branch" size={23}/></div><div><span className="panel-kicker">WORKED EXAMPLE</span><h3>Vibe Code Simulator</h3><p>The full story promises that the Founder will eventually pay $47,000 for Grandma&apos;s operation. The playable prototype currently covers only Days 7–8, starts with $700, and cannot reach that outcome. This reviewed snapshot also preserves the real portrait mismatch Continuity Lab found, so the demonstration can show the diagnosis, the dependency trace, and the corrected USER_0047 binding as a before-and-after.</p><div className="sample-question-list">{SUGGESTED_QUESTIONS.map((question) => <button key={question} onClick={() => onAsk(question)}>{question}<Icon name="arrow" size={14}/></button>)}</div></div><button className="outline-button" onClick={() => onAsk()}>Show the main answer <Icon name="arrow" size={16}/></button></div>;
 }
 
-function UploadPanel({ sources, isUploading, documentType, setDocumentType, onChange, onPaste }: { sources: StoredSource[]; isUploading: boolean; documentType: UploadDocumentType; setDocumentType: (value: UploadDocumentType) => void; onChange: (event: ChangeEvent<HTMLInputElement>) => void; onPaste: (text: string) => Promise<boolean> }) {
+function TryMaterialPanel({ onConnect }: { onConnect: () => void }) {
+  return <div className="try-panel">
+    <div className="try-copy"><span className="source-symbol blue"><Icon name="file" size={23}/></span><span className="panel-kicker">TRY WITH YOUR OWN MATERIAL</span><h3>Bring a file into ChatGPT—not into this website.</h3><p>Attach a story bible, script, specification, notes, or Gutenberg text to a ChatGPT conversation with Continuity Lab enabled. ChatGPT selects the question-relevant passages; the MCP checks exact claims, identities, relationships, dependencies, and uncertainty.</p><div className="trust-note"><strong>Your account, your conversation.</strong><p>The public site does not ask for an OpenAI API key and visitors cannot spend the creator&apos;s API credits.</p></div></div>
+    <div className="try-guide"><span className="panel-kicker">A GOOD FIRST TEST</span><ol><li><span>1</span><p>Connect Continuity Lab in ChatGPT.</p></li><li><span>2</span><p>Attach a text-based source and ask a focused continuity question.</p></li><li><span>3</span><p>Ask ChatGPT to show the exact evidence and unresolved ambiguities.</p></li></ol><div className="try-prompt"><span>COPY THIS PROMPT</span><p>“Using Continuity Lab, identify the important characters, goals, promises, and dependencies in the attached material. Then tell me what would conflict if I changed the protagonist&apos;s next decision.”</p></div><button className="dark-button" type="button" onClick={onConnect}>Connect Continuity Lab <Icon name="arrow" size={14}/></button></div>
+  </div>;
+}
+
+function TryRepositoryPanel({ onConnect }: { onConnect: () => void }) {
+  return <div className="try-panel">
+    <div className="try-copy"><span className="source-symbol ink"><Icon name="branch" size={23}/></span><span className="panel-kicker">TRY A PUBLIC REPOSITORY</span><h3>Ask about a public GitHub repository in ChatGPT.</h3><p>Give ChatGPT an explicit public GitHub URL. Continuity Lab pins one version, finds likely authority files, asks you to choose a project when the repository contains several, and returns bounded excerpts without running repository code.</p><div className="trust-note"><strong>Read-only and deliberately bounded.</strong><p>The public inspector reads a small, question-relevant slice. Private repositories and exhaustive absence claims are intentionally outside this demonstration.</p></div></div>
+    <div className="try-guide"><span className="panel-kicker">PUBLIC REPOSITORY PROMPT</span><div className="try-prompt"><span>COPY THIS PROMPT</span><p>“In https://github.com/victortanws/vibe-coder-sim, which sources define Grandma&apos;s operation, and what must happen before the Founder can reach and pay for it? Use Continuity Lab and cite the repository evidence.”</p></div><div className="mcp-safety"><strong>No shared API key</strong><p>ChatGPT supplies the conversational reasoning. The Continuity Lab MCP performs the read-only inspection and verification.</p></div><button className="dark-button" type="button" onClick={onConnect}>Connect Continuity Lab <Icon name="arrow" size={14}/></button></div>
+  </div>;
+}
+
+function UploadPanel({ sources, isUploading, onChange, onPaste }: { sources: StoredSource[]; isUploading: boolean; onChange: (event: ChangeEvent<HTMLInputElement>) => void; onPaste: (text: string) => Promise<boolean> }) {
   const [pastedText, setPastedText] = useState("");
-  const typeExplanation = documentType === "narrative"
-    ? "The story, characters, events, and rules as this document describes them. Uploading it does not automatically make every statement approved canon."
-    : documentType === "proposal"
-      ? "A possible change or experiment. It stays separate from the current version."
-      : "Background, research, commentary, or historical material used to explain context.";
-  return <div className="upload-panel"><div className="upload-input-column"><label className="upload-classifier"><span>How should this document be read?</span><select value={documentType} disabled={isUploading} onChange={(event) => setDocumentType(event.target.value as UploadDocumentType)}><option value="narrative">Story or source text</option><option value="reference">Reference material</option><option value="proposal">Draft or proposal</option></select><small>{typeExplanation}</small></label><label className="upload-drop"><input type="file" multiple accept=".txt,.md,.markdown,.json,.yaml,.yml,.xml,.csv,.tsv,.pdf,.doc,.docx,.html,.htm,.pptx" onChange={(event) => void onChange(event)}/><span className="source-symbol blue"><Icon name="upload" size={23}/></span><strong>{isUploading ? "Storing and indexing…" : "Upload up to 12 sources"}</strong><p>TXT, Markdown, JSON, YAML, XML, CSV/TSV, HTML · operator preview: searchable PDF, DOC/DOCX, PPTX · 20 MB each</p><small>PDF/Office upload is allowlisted because its contents are not yet credential-scanned. XLSX, images, scanned/OCR-only PDFs, EPUB, and RTF need a dedicated extractor.</small></label><div className="paste-source"><textarea value={pastedText} onChange={(event) => setPastedText(event.target.value)} placeholder="Or paste a story, summary, cast list, ID table, or notes…"/><button type="button" disabled={isUploading || !pastedText.trim()} onClick={() => void onPaste(pastedText).then((stored) => { if (stored) setPastedText(""); })}>Store pasted text</button></div></div><div className="uploaded-list"><div className="panel-heading"><span>WORKSPACE SOURCES</span><strong>{sources.length}</strong></div>{sources.length ? sources.slice(0, 5).map((source) => <div key={source.id} title={source.indexError || "Provider indexing does not independently verify complete extraction."}><Icon name="file" size={17}/><span><strong>{source.logicalName || source.originalFilename || source.filename}</strong><small>{formatBytes(source.byteSize)} · {source.documentType} · {source.authority} · {(source.extractionStatus ?? "not_yet_verified").replaceAll("_", " ")}</small></span><em className={source.indexStatus}>{source.indexStatus.replaceAll("_", " ")}</em></div>) : <EmptyState copy="Each source will show storage/index status. Indexed means searchable by the provider; it does not prove that every page or entity was extracted."/>}</div></div>;
+  return <div className="upload-panel"><div className="upload-input-column"><div className="upload-intro"><span className="panel-kicker">ADD PROJECT MATERIAL</span><h3>Upload the sources you want Continuity Lab to reason from.</h3><p>Story bibles, scripts, specifications, notes, and structured records remain source material—not automatically approved canon.</p></div><label className="upload-drop"><input type="file" multiple accept=".txt,.md,.markdown,.json,.yaml,.yml,.xml,.csv,.tsv,.pdf,.doc,.docx,.html,.htm,.pptx" onChange={(event) => void onChange(event)}/><span className="source-symbol blue"><Icon name="upload" size={23}/></span><strong>{isUploading ? "Storing and indexing…" : "Upload up to 12 sources"}</strong><p>TXT, Markdown, JSON, YAML, XML, CSV/TSV, HTML · operator preview: searchable PDF, DOC/DOCX, PPTX · 20 MB each</p><small>PDF/Office upload is allowlisted because its contents are not yet credential-scanned. XLSX, images, scanned/OCR-only PDFs, EPUB, and RTF need a dedicated extractor.</small></label><div className="paste-source"><textarea value={pastedText} onChange={(event) => setPastedText(event.target.value)} placeholder="Or paste a story, summary, cast list, ID table, or notes…"/><button type="button" disabled={isUploading || !pastedText.trim()} onClick={() => void onPaste(pastedText).then((stored) => { if (stored) setPastedText(""); })}>Store pasted text</button></div></div><div className="uploaded-list"><div className="panel-heading"><span>PROJECT SOURCES</span><strong>{sources.length}</strong></div>{sources.length ? sources.slice(0, 5).map((source) => <div key={source.id} title={source.indexError || "Provider indexing does not independently verify complete extraction."}><Icon name="file" size={17}/><span><strong>{source.logicalName || source.originalFilename || source.filename}</strong><small>{formatBytes(source.byteSize)} · {source.documentType} · {source.authority} · {(source.extractionStatus ?? "not_yet_verified").replaceAll("_", " ")}</small></span><em className={source.indexStatus}>{source.indexStatus.replaceAll("_", " ")}</em></div>) : <EmptyState copy="Files you add will appear here with their storage and indexing status. Indexed means searchable; it does not mean every statement has become canon."/>}</div></div>;
 }
 
 function GitHubPanel({ repository, repositoryUrl, repositoryRef, repositoryScope, repositoryScopeChoices, setRepositoryUrl, setRepositoryRef, setRepositoryScope, onSubmit }: {
@@ -733,7 +719,7 @@ function McpPanel() {
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   }
-  return <div className="mcp-panel"><div><div className="source-symbol ink"><Icon name="code" size={23}/></div><span className="panel-kicker">CONNECT TO CHATGPT</span><h3>Use Continuity Lab inside a ChatGPT conversation.</h3><p>ChatGPT can call the same read-only tools while you talk. You can ask about the built-in example, pass text from an attachment, or give it a public GitHub repository to inspect.</p><div className="connection-status ready"><strong>Ready to connect</strong><p>This MCP address is public so ChatGPT can reach it. The tools are read-only and do not ask you to paste an OpenAI API key into this site.</p></div></div><div className="connect-guide"><span className="panel-kicker">CONNECT IN FOUR STEPS</span><ol><li><span>1</span><p>In ChatGPT, open <b>Settings → Security and login</b> and turn on <b>Developer mode</b>.</p></li><li><span>2</span><p>Open <b>Settings → Plugins</b>, press <b>+</b>, and create a developer-mode app named Continuity Lab.</p></li><li><span>3</span><p>Paste the MCP address below. After ChatGPT lists the five tools, press <b>Create</b>.</p></li><li><span>4</span><p>Start a new chat, choose <b>+ → More → Continuity Lab</b>, then ask a question normally.</p></li></ol><div className="mcp-endpoint"><span>MCP ADDRESS</span><code>{endpoint}</code><button type="button" onClick={() => void copyEndpoint()}>{copied ? "Copied" : "Copy address"}</button></div><div className="mcp-actions"><a href="https://chatgpt.com/plugins" target="_blank" rel="noreferrer">Open ChatGPT Plugins <Icon name="arrow" size={14}/></a><a href="https://developers.openai.com/apps-sdk/deploy/connect-chatgpt" target="_blank" rel="noreferrer">Official connection guide <Icon name="arrow" size={14}/></a></div></div></div>;
+  return <div className="mcp-panel"><div><img className="mcp-brand-logo" src="/continuity-lab-plugin-icon.png" alt="Continuity Lab compass-star logo"/><span className="panel-kicker">TRY CONTINUITY LAB TODAY</span><h3>Use Continuity Lab inside a ChatGPT conversation.</h3><p>ChatGPT can call the same five read-only tools while you talk: answer a question, trace dependencies, analyze a proposed change, compile supplied material, or inspect a public GitHub repository.</p><div className="mcp-example"><span>ASK THE WORKED EXAMPLE</span><p>“Trace every dependency required before Grandma&apos;s operation can happen. Include missing links and downstream effects.”</p><small>The MCP returns the same cited entities and dependency chain shown in the worked example above.</small></div><div className="connection-status ready"><strong>Ready to connect</strong><p>This MCP address is public so ChatGPT can reach it. The tools are read-only and do not ask you to paste an OpenAI API key into this site.</p></div></div><div className="connect-guide"><span className="panel-kicker">CONNECT IN FOUR STEPS</span><ol><li><span>1</span><p>In ChatGPT, open <b>Settings → Security and login</b> and turn on <b>Developer mode</b>.</p></li><li><span>2</span><p>Open <b>Settings → Plugins</b>, press <b>+</b>, and create a developer-mode app named Continuity Lab.</p></li><li><span>3</span><p>Paste the MCP address below. After ChatGPT lists the five tools, press <b>Create</b>.</p></li><li><span>4</span><p>Start a new chat, choose <b>+ → More → Continuity Lab</b>, then ask a question normally.</p></li></ol><div className="mcp-endpoint"><span>MCP ADDRESS</span><code>{endpoint}</code><button type="button" onClick={() => void copyEndpoint()}>{copied ? "Copied" : "Copy address"}</button></div><div className="mcp-actions"><a href="https://chatgpt.com/plugins" target="_blank" rel="noreferrer">Open ChatGPT Plugins <Icon name="arrow" size={14}/></a><a href="https://developers.openai.com/apps-sdk/deploy/connect-chatgpt" target="_blank" rel="noreferrer">Official connection guide <Icon name="arrow" size={14}/></a></div></div></div>;
 }
 
 function DependencyView({ dependencies, path }: { dependencies: DependencyEdge[]; path: string[] }) {
@@ -746,11 +732,11 @@ function EmptyState({ copy }: { copy: string }) {
   return <div className="empty-state"><span>—</span><p>{copy}</p></div>;
 }
 
-function engineLabel(mode: EngineMode, projectMode: ProjectMode) {
+function engineLabel(mode: EngineMode, projectMode: ProjectMode, hasWorkspaceMaterial: boolean) {
   if (mode === "gpt-5.6-sol") return "GPT-5.6 Sol · live reasoning";
   if (mode === "demonstration") return "Vibe Code Simulator example";
   if (mode === "unavailable") return "Live reasoning needs setup";
-  return projectMode === "sample" ? "Example ready" : "Your files selected";
+  return projectMode === "sample" ? "Example ready" : hasWorkspaceMaterial ? "Your project is ready" : "Add material below";
 }
 
 function verdictLabel(verdict: Verdict) {

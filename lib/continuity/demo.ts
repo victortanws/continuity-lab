@@ -282,7 +282,7 @@ export const VCS_DEMO_EVIDENCE: EvidenceChunk[] = [
     sourceVersionId: "SRC-VCS-UI-BINDINGS-v3",
     title: "Customer-message visual binding",
     locator: "customer-message / adjacent portrait",
-    text: "The shipped Day 8 USER_0047 customer-message presentation binds its adjacent portrait slot to ART-27, which is CAST-27. The message text refers to USER_0047's separate unnamed grandmother, so the visual and textual referents do not match. The Founder portrait is the proposed replacement for this framing slot.",
+    text: "The shipped Day 8 USER_0047 customer-message presentation binds its adjacent portrait slot to ART-27, which is CAST-27. The message text refers to USER_0047's separate unnamed grandmother, so the visual and textual referents do not match. The canonical USER_0047 portrait is the proposed replacement for this framing slot.",
     score: 0.88,
     authority: "production",
     role: "implementation",
@@ -495,7 +495,7 @@ function visualBindingAnswer(request: QueryRequest, byId: Map<string, EvidenceCh
   return baseAnswer(request, {
     verdict: "CONFLICT",
     truthStatus: "conflicted",
-    answer: "No—the CAST-27 portrait is not a valid identity image for that message. The shipped Day 8 customer card sends two different identity signals: its adjacent portrait is ART-27, the asset for CAST-27 (the Founder protagonist's grandmother), while the text refers to USER_0047's different, unnamed grandmother. The picture therefore shows CAST-27, but it does not identify the grandmother discussed by the customer. Rebinding the framing slot to the Founder would remove the false association without merging the two grandmothers.",
+    answer: "No—the CAST-27 portrait is not a valid identity image for that message. The worked Day 8 snapshot sends two different identity signals: its adjacent portrait is ART-27, the asset for CAST-27 (the Founder protagonist's grandmother), while the text refers to USER_0047's different, unnamed grandmother. The picture therefore shows CAST-27, but it does not identify the grandmother discussed by the customer. Rebinding the slot to USER_0047—the actual speaker—removes the false association without merging the two grandmothers.",
     confidence: "high",
     evidence: compactReferences([
       reference(byId, "EV-VCS-PORTRAIT-CONSTRAINT", "supports", "Establishes the identity rule for a customer-message portrait.", "normative"),
@@ -531,13 +531,13 @@ function visualBindingAnswer(request: QueryRequest, byId: Map<string, EvidenceCh
       evidenceIds: ["EV-VCS-CUSTOMER-MESSAGE-BINDING"],
     }],
     proposal: {
-      summary: "Use the Founder portrait for the USER_0047 customer-message framing slot while keeping ART-27 reserved for scenes explicitly about CAST-27.",
-      assumptions: ["The framing portrait represents the player-facing speaker or viewpoint, not a newly asserted identity for the customer's grandmother."],
+      summary: "Use the canonical USER_0047 portrait for the customer-message framing slot while keeping ART-27 reserved for scenes explicitly about CAST-27.",
+      assumptions: ["The framing portrait identifies the speaker, not a newly asserted identity for the customer's grandmother."],
       requiredChanges: ["Replace the customer-message portrait binding.", "Retain stable IDs for CAST-27 and the unnamed customer grandmother.", "Add a UI assertion that message text and portrait roles cannot silently merge entities."],
       downstreamRisks: ["Other customer messages may reuse the same incorrect binding.", "A purely visual regression test may miss semantic identity drift."],
     },
     followUpQuestions: [...VCS_DEMO_FOLLOW_UPS.visualBinding],
-    caveats: ["The Founder replacement is a proposed presentation fix; it does not change either grandmother's canonical identity."],
+    caveats: ["The USER_0047 replacement is a presentation fix; it does not change either grandmother's canonical identity."],
   });
 }
 
