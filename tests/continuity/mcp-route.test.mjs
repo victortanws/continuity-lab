@@ -80,7 +80,7 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
     assert.deepEqual(tool.securitySchemes, [{ type: "noauth" }]);
     assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
     assert.equal(tool._meta["continuity/contractVersion"], "continuity.mcp.v1");
-    assert.equal(tool._meta["continuity/routerVersion"], "3.5.0");
+    assert.equal(tool._meta["continuity/routerVersion"], "3.6.0");
     if (tool.inputSchema.properties.projectId) {
       assert.equal(tool.inputSchema.properties.projectId.maxLength, 128);
     }
@@ -89,13 +89,26 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
   const repositoryTool = listed.body.result.tools.find((tool) => tool.name === "continuity_inspect_public_repository");
   const reviewedAnswerTool = listed.body.result.tools.find((tool) => tool.name === "continuity_answer_question");
   assert.equal(compileTool.inputSchema.properties.claims.items.properties.object.minLength, 0);
+  assert.equal(compileTool._meta["continuity/entityPackageVersion"], "continuity.entity-package.v1");
+  assert.equal(compileTool.outputSchema.properties.entityPackage.additionalProperties, false);
+  assert.equal(compileTool.outputSchema.properties.entityPackage.properties.mentions.items.additionalProperties, false);
+  assert.deepEqual(
+    compileTool.outputSchema.properties.entityPackage.properties.mentions.items.properties.coordinateSystem.enum,
+    ["utf16_code_units"],
+  );
   assert.deepEqual(compileTool.inputSchema.properties.claims.items.properties.frameArity.enum, ["transitive", "intransitive"]);
   assert.match(compileTool.description, /empty object requires frameArity intransitive/i);
   assert.match(compileTool.description, /relation requires an exact cue and two accepted endpoint spans/i);
   assert.match(initialized.body.result.instructions, /copy subject, predicate, and any non-empty object byte-for-byte/i);
   assert.match(initialized.body.result.instructions, /omit explicitId unless that exact ID occurs/i);
+  assert.match(initialized.body.result.instructions, /prefer entityPackage and obey its ambiguity sets and QA action-safety flags/i);
+  assert.match(initialized.body.result.instructions, /never treat ambient ChatGPT attachments, Codex working-directory files/i);
+  assert.match(initialized.body.result.instructions, /scopeReceipt/i);
   assert.match(repositoryTool.description, /multiple project scopes/i);
+  assert.equal(repositoryTool.title, "Ask about a public GitHub repository");
+  assert.match(repositoryTool.description, /if the user says only 'this repository', ask them for the URL/i);
   assert.ok(repositoryTool.inputSchema.properties.projectScope);
+  assert.ok(compileTool.inputSchema.properties.sourceContext);
   assert.match(reviewedAnswerTool.description, /Vibe Code Simulator example only/i);
 
   const ping = await call({ jsonrpc: "2.0", id: "ping", method: "ping" });
@@ -153,10 +166,16 @@ test("uploaded text is exact-span verified through the keyless MCP context tool"
 
   assert.equal(compiled.body.result.isError, false);
   assert.equal(compiled.body.result.structuredContent.contractVersion, "continuity.mcp.v1");
-  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.5.0");
+  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.6.0");
   assert.equal(compiled.body.result.structuredContent.coverage.completeForProjectCorpus, false);
   assert.equal(compiled.body.result.structuredContent.claims.length, 2);
   assert.equal(compiled.body.result.structuredContent.entities.every((entity) => entity.resolution === "ambiguous"), true);
+  assert.equal(compiled.body.result.structuredContent.entityPackage.version, "continuity.entity-package.v1");
+  assert.equal(compiled.body.result.structuredContent.entityPackage.mentions.length, 2);
+  assert.equal(compiled.body.result.structuredContent.entityPackage.entities.length, 2);
+  assert.equal(compiled.body.result.structuredContent.entityPackage.ambiguitySets.length, 1);
+  assert.equal(compiled.body.result.structuredContent.entityPackage.qa.safeForAutomaticIdentityMerge, false);
+  assert.equal(compiled.body.result.structuredContent.entityPackage.qa.safeForProjectCanonPromotion, false);
   assert.equal(compiled.body.result.structuredContent.conflicts.length, 1);
   assert.equal(compiled.body.result.structuredContent.route.graphUsed, true);
   assert.ok(compiled.body.result.structuredContent.route.validators.length <= 4);
@@ -268,8 +287,89 @@ test("the public-repository MCP tool uses anonymous bounded GitHub reads and pin
     assert.equal(inspected.body.result.structuredContent.scope.selected.rootPath, ".");
     assert.equal(inspected.body.result.structuredContent.excerpts.length, 1);
     assert.match(inspected.body.result.structuredContent.excerpts[0].locator, new RegExp(commit));
+    assert.equal(inspected.body.result.structuredContent.scopeReceipt.repository, "example/public-story");
+    assert.equal(inspected.body.result.structuredContent.scopeReceipt.pinnedCommit, commit);
+    assert.equal(inspected.body.result.structuredContent.scopeReceipt.scope.rootPath, ".");
+    assert.equal(inspected.body.result.structuredContent.scopeReceipt.excerpts.length, 1);
+    assert.equal(inspected.body.result.structuredContent.scopeReceipt.trust, "integrity_check_only");
+    assert.equal(inspected.body.result.structuredContent.scopeReceipt.grantsAuthority, false);
+
+    const excerpts = inspected.body.result.structuredContent.excerpts;
+    const compiled = await call(toolCall("repo-compile", "continuity_compile_material", {
+      question: "What is the canon of this repository?",
+      sourceContext: {
+        kind: "public_github_excerpts",
+        receipt: inspected.body.result.structuredContent.scopeReceipt,
+      },
+      documents: excerpts.map((excerpt) => ({ name: excerpt.path, text: excerpt.text })),
+    }));
+    assert.equal(compiled.body.result.isError, false);
+    assert.equal(compiled.body.result.structuredContent.sourceKind, "public_github_excerpts");
+    assert.equal(compiled.body.result.structuredContent.sourceContext.repository, "example/public-story");
+    assert.equal(compiled.body.result.structuredContent.sourceContext.pinnedCommit, commit);
+
+    const tamperedReceipt = structuredClone(inspected.body.result.structuredContent.scopeReceipt);
+    tamperedReceipt.scope.label = "A different project";
+    const tampered = await call(toolCall("repo-tampered", "continuity_compile_material", {
+      question: "What is the canon of this repository?",
+      sourceContext: { kind: "public_github_excerpts", receipt: tamperedReceipt },
+      documents: excerpts.map((excerpt) => ({ name: excerpt.path, text: excerpt.text })),
+    }));
+    assert.equal(tampered.body.result.isError, true);
+    assert.match(tampered.body.result.content[0].text, /repository_scope_mismatch/i);
+
+    const crossScope = await call(toolCall("repo-cross-scope", "continuity_compile_material", {
+      question: "What is the canon of this repository?",
+      sourceContext: {
+        kind: "public_github_excerpts",
+        receipt: inspected.body.result.structuredContent.scopeReceipt,
+      },
+      documents: [
+        ...excerpts.map((excerpt) => ({ name: excerpt.path, text: excerpt.text })),
+        { name: "other-project/canon.md", text: "Unrelated canon." },
+      ],
+    }));
+    assert.equal(crossScope.body.result.isError, true);
+    assert.match(crossScope.body.result.content[0].text, /repository_scope_mismatch/i);
     assert.ok(calls.length <= 8);
     assert.ok(calls.every((item) => item.authorization === null), "the anonymous public tool must not use a server GitHub credential");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("an ambiguous public repository returns project choices but no excerpts or scope receipt", async () => {
+  const previousFetch = globalThis.fetch;
+  const commit = "d".repeat(40);
+  const tree = "e".repeat(40);
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/commits/HEAD")) {
+      return Response.json({ sha: commit, commit: { tree: { sha: tree } } });
+    }
+    if (String(url).includes(`/git/trees/${tree}`)) {
+      return Response.json({
+        tree: [
+          { path: "apps/story-one/package.json", type: "blob", mode: "100644", sha: "1".repeat(40), size: 2 },
+          { path: "apps/story-two/package.json", type: "blob", mode: "100644", sha: "2".repeat(40), size: 2 },
+        ],
+        truncated: false,
+      });
+    }
+    throw new Error(`No blob should be read before project scope is selected: ${url}`);
+  };
+  try {
+    const inspected = await call(toolCall("repo-ambiguous", "continuity_inspect_public_repository", {
+      repository: "example/multiple-stories",
+      question: "What is canon in this repository?",
+    }));
+    assert.equal(inspected.body.result.isError, false);
+    assert.equal(inspected.body.result.structuredContent.scope.status, "ambiguous");
+    assert.ok(inspected.body.result.structuredContent.scope.candidates.length >= 2);
+    assert.ok(inspected.body.result.structuredContent.scope.candidates.some((scope) => scope.rootPath === "apps/story-one"));
+    assert.ok(inspected.body.result.structuredContent.scope.candidates.some((scope) => scope.rootPath === "apps/story-two"));
+    assert.equal(inspected.body.result.structuredContent.excerpts.length, 0);
+    assert.equal(inspected.body.result.structuredContent.scopeReceipt, null);
+    assert.match(inspected.body.result.content[0].text, /ask the user which one they mean/i);
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -395,6 +495,32 @@ test("reviewed VCS tools refuse to guess what a caller means by this folder", as
   assert.equal(result.body.result.isError, true);
   assert.match(result.body.result.content[0].text, /project_scope_required/);
   assert.match(result.body.result.content[0].text, /public GitHub repository|attachment text/i);
+});
+
+test("material compilation refuses repository-wide questions without an inspected scope receipt", async () => {
+  for (const sourceContext of [undefined, { kind: "direct_upload" }]) {
+    const result = await call(toolCall(`compile-scope-${sourceContext ? "direct" : "missing"}`, "continuity_compile_material", {
+      question: "What is the canon of this repository?",
+      ...(sourceContext ? { sourceContext } : {}),
+      documents: [{ name: "STORY_BIBLE.md", text: "The hero remains human." }],
+    }));
+    assert.equal(result.body.result.isError, true);
+    assert.match(result.body.result.content[0].text, /repository_scope_receipt_required/i);
+    assert.match(result.body.result.content[0].text, /explicit public GitHub repository/i);
+  }
+});
+
+test("ordinary direct uploads remain compatible without a repository scope receipt", async () => {
+  const result = await call(toolCall("compile-upload", "continuity_compile_material", {
+    question: "Who remains human in this manuscript?",
+    sourceContext: { kind: "direct_upload" },
+    documents: [{ name: "manuscript.md", text: "Han remains human." }],
+    entityMentions: [{ documentName: "manuscript.md", quote: "Han remains human.", mention: "Han", entityType: "character" }],
+  }));
+  assert.equal(result.body.result.isError, false);
+  assert.equal(result.body.result.structuredContent.sourceKind, "uploaded_text");
+  assert.equal(result.body.result.structuredContent.sourceContext.kind, "direct_upload");
+  assert.equal(result.body.result.structuredContent.sourceContext.repository, null);
 });
 
 test("the public MCP answers the central VCS build question with proof and a minimal repair", async () => {

@@ -16,6 +16,11 @@ import {
 } from "@/lib/continuity/demo";
 import { VCS_DEMO_TIME_SCOPE } from "@/lib/continuity/demo-questions";
 import { ContinuityEngine, ContinuityInputError } from "@/lib/continuity/engine";
+import {
+  buildContinuityEntityPackage,
+  ENTITY_PACKAGE_JSON_SCHEMA,
+  ENTITY_PACKAGE_VERSION,
+} from "@/lib/continuity/entity-package";
 import { ConnectorExecutionBudget } from "@/lib/continuity/http/connector-execution";
 import { guardRequestBody, readJsonBodyBounded, RequestBodyError } from "@/lib/continuity/http/security";
 import {
@@ -32,6 +37,13 @@ import {
   type QuestionGraphQueryResult,
 } from "@/lib/continuity/question-graph";
 import { GitHubRepositoryProvider, RepositoryProviderError } from "@/lib/continuity/repositories/github";
+import {
+  buildRepositoryScopeReceipt,
+  questionRequiresRepositoryScope,
+  REPOSITORY_SCOPE_RECEIPT_JSON_SCHEMA,
+  validateRepositoryScopeReceipt,
+  type RepositoryScopeReceipt,
+} from "@/lib/continuity/repository-scope-receipt";
 import { ContinuityRepository } from "@/lib/continuity/storage/repository";
 
 export const runtime = "edge";
@@ -104,7 +116,7 @@ const TOOL_TITLES: Record<ExposedToolName, string> = {
   continuity_trace_dependencies: "Trace Vibe Code Simulator dependencies",
   continuity_analyze_change: "Analyze a Vibe Code Simulator change",
   continuity_compile_material: "Verify uploaded or pasted material",
-  continuity_inspect_public_repository: "Inspect a public GitHub repository",
+  continuity_inspect_public_repository: "Ask about a public GitHub repository",
 };
 
 const REVIEWED_TOOL_OUTPUT_SCHEMA = {
@@ -203,13 +215,29 @@ const CONTEXT_TOOL_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
-    "contractVersion", "routerVersion", "sourceKind", "question", "route",
-    "coverage", "claims", "entities", "relations", "conflicts", "graph", "rejected", "diagnostics",
+    "contractVersion", "routerVersion", "sourceKind", "sourceContext", "question", "route",
+    "coverage", "claims", "entities", "entityPackage", "relations", "conflicts", "graph", "rejected", "diagnostics",
   ],
   properties: {
     contractVersion: { type: "string", enum: [CONTINUITY_MCP_CONTRACT_VERSION] },
     routerVersion: { type: "string", enum: [AUTHORITY_ROUTER_VERSION] },
-    sourceKind: { type: "string", enum: ["uploaded_text"] },
+    sourceKind: { type: "string", enum: ["uploaded_text", "public_github_excerpts"] },
+    sourceContext: {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "repository", "pinnedCommit", "scope"],
+      properties: {
+        kind: { type: "string", enum: ["direct_upload", "public_github_excerpts"] },
+        repository: { type: ["string", "null"] },
+        pinnedCommit: { type: ["string", "null"] },
+        scope: {
+          type: ["object", "null"],
+          additionalProperties: false,
+          required: ["id", "label", "rootPath"],
+          properties: { id: { type: "string" }, label: { type: "string" }, rootPath: { type: "string" } },
+        },
+      },
+    },
     question: { type: "string" },
     route: {
       type: "object",
@@ -260,6 +288,7 @@ const CONTEXT_TOOL_OUTPUT_SCHEMA = {
         },
       },
     },
+    entityPackage: ENTITY_PACKAGE_JSON_SCHEMA,
     relations: {
       type: "array",
       items: {
@@ -308,7 +337,7 @@ const REPOSITORY_TOOL_OUTPUT_SCHEMA = {
   additionalProperties: false,
   required: [
     "contractVersion", "routerVersion", "sourceKind", "question", "repository",
-    "requestedRef", "pinnedCommit", "scope", "coverage", "excerpts", "omitted", "usage", "diagnostics",
+    "requestedRef", "pinnedCommit", "scope", "scopeReceipt", "coverage", "excerpts", "omitted", "usage", "diagnostics",
   ],
   properties: {
     contractVersion: { type: "string", enum: [CONTINUITY_MCP_CONTRACT_VERSION] },
@@ -350,6 +379,7 @@ const REPOSITORY_TOOL_OUTPUT_SCHEMA = {
         reason: { type: "string" },
       },
     },
+    scopeReceipt: { ...REPOSITORY_SCOPE_RECEIPT_JSON_SCHEMA, type: ["object", "null"] },
     coverage: {
       type: "object",
       additionalProperties: false,
@@ -440,8 +470,8 @@ export async function POST(request: Request): Promise<Response> {
     return rpcResult(id, {
       protocolVersion,
       capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: "continuity-lab-reviewed-sample", version: "0.2.0" },
-      instructions: "Read-only, stateless continuity tools. The three reviewed-example tools apply only to the immutable Vibe Code Simulator example; they never synchronize a repository and must never answer what is true in an arbitrary folder, repository, or project. For a public GitHub URL, call continuity_inspect_public_repository first. If it returns multiple project scopes, ask the user which one they mean and call it again with projectScope; never blend scopes. For uploaded or pasted material, read only question-relevant text, propose exact quotes and entity mentions to continuity_compile_material, then answer from the verified receipt; rejected or absent claims remain unknown. In each claim, copy subject, predicate, and any non-empty object byte-for-byte from the quote in that order. Use frameArity intransitive with object \"\" only for a single copied predicate token that finishes the quoted clause; never discard an expressed object. Mark polarity negative only when the quote directly negates the claim. Omit explicitId unless that exact ID occurs in the entity quote. claimKind classifies a source assertion and never grants authority. For causal structure, optionally propose relations by original claim index: the supporting positive causal, normative, or historical claim must contain the exact cue and both accepted endpoint spans. Direction is prerequisite to dependent, trigger to effect, or earlier to later. Do not materialize negative, or/unless, or alternative-path logic as a simple edge; admitted edges aid navigation and are not reachability proofs. After repository scope resolution, pass returned excerpts to continuity_compile_material when exact entity, conflict, or causal structure is needed. Neither path promotes source assertions to project canon. Change analyses are proposals and never become canon.",
+      serverInfo: { name: "continuity-lab", version: "0.3.0" },
+      instructions: "Read-only, stateless continuity tools. The three reviewed-example tools apply only to the immutable Vibe Code Simulator example; they never synchronize a repository and must never answer what is true in an arbitrary folder, repository, or project. Never treat ambient ChatGPT attachments, Codex working-directory files, or the phrase 'this repository' as a repository selected through Continuity Lab. If a repository question lacks an explicit public GitHub URL or owner/repository value, ask the user for it. For any public GitHub repository question, call continuity_inspect_public_repository first. If it returns multiple project scopes, ask the user which named scope they mean and call it again with projectScope; never blend scopes. After resolution, pass the returned excerpts unchanged to continuity_compile_material with sourceContext kind public_github_excerpts and the returned scopeReceipt. For uploaded or pasted material, use sourceContext kind direct_upload, read only question-relevant text, propose exact quotes and entity mentions to continuity_compile_material, then answer from the verified receipt; rejected or absent claims remain unknown. In each claim, copy subject, predicate, and any non-empty object byte-for-byte from the quote in that order. Use frameArity intransitive with object \"\" only for a single copied predicate token that finishes the quoted clause; never discard an expressed object. Mark polarity negative only when the quote directly negates the claim. Omit explicitId unless that exact ID occurs in the entity quote. claimKind classifies a source assertion and never grants authority. For causal structure, optionally propose relations by original claim index: the supporting positive causal, normative, or historical claim must contain the exact cue and both accepted endpoint spans. Direction is prerequisite to dependent, trigger to effect, or earlier to later. Do not materialize negative, or/unless, or alternative-path logic as a simple edge; admitted edges aid navigation and are not reachability proofs. For downstream machine use, prefer entityPackage and obey its ambiguity sets and QA action-safety flags; never merge or promote merely because serialization succeeded. A scope receipt is an integrity binding, not authentication or canon authority. Neither path promotes source assertions to project canon. Change analyses are proposals and never become canon.",
     });
   }
 
@@ -478,6 +508,9 @@ export async function POST(request: Request): Promise<Response> {
           securitySchemes: NOAUTH_SECURITY_SCHEMES,
           "continuity/contractVersion": CONTINUITY_MCP_CONTRACT_VERSION,
           "continuity/routerVersion": AUTHORITY_ROUTER_VERSION,
+          ...(name === "continuity_compile_material"
+            ? { "continuity/entityPackageVersion": ENTITY_PACKAGE_VERSION }
+            : {}),
         },
       })),
     });
@@ -629,7 +662,7 @@ function queryForTool(name: ReviewedToolName, input: JsonObject): QueryRequest {
 
 function validateContextToolArguments(name: ContextToolName, input: JsonObject): string | null {
   const allowed = name === "continuity_compile_material"
-    ? new Set(["question", "documents", "claims", "entityMentions", "relations"])
+    ? new Set(["question", "sourceContext", "documents", "claims", "entityMentions", "relations"])
     : new Set(["repository", "question", "requestedRef", "projectScope"]);
   const unexpected = Object.keys(input).filter((key) => !allowed.has(key));
   if (unexpected.length) return `Unexpected argument${unexpected.length === 1 ? "" : "s"}: ${unexpected.join(", ")}.`;
@@ -640,6 +673,21 @@ function validateContextToolArguments(name: ContextToolName, input: JsonObject):
   }
   if (name === "continuity_compile_material") {
     if (!Array.isArray(input.documents) || input.documents.length < 1) return "documents must be a non-empty array.";
+    if (input.sourceContext !== undefined) {
+      if (!isRecord(input.sourceContext)) return "sourceContext must be an object.";
+      const contextKeys = Object.keys(input.sourceContext);
+      const unexpectedContextKeys = contextKeys.filter((key) => key !== "kind" && key !== "receipt");
+      if (unexpectedContextKeys.length) return `Unexpected sourceContext argument${unexpectedContextKeys.length === 1 ? "" : "s"}: ${unexpectedContextKeys.join(", ")}.`;
+      if (input.sourceContext.kind !== "direct_upload" && input.sourceContext.kind !== "public_github_excerpts") {
+        return "sourceContext.kind must be direct_upload or public_github_excerpts.";
+      }
+      if (input.sourceContext.kind === "direct_upload" && input.sourceContext.receipt !== undefined) {
+        return "Direct uploads must not include a repository scope receipt.";
+      }
+      if (input.sourceContext.kind === "public_github_excerpts" && input.sourceContext.receipt === undefined) {
+        return "Public GitHub excerpts require the scope receipt returned by continuity_inspect_public_repository.";
+      }
+    }
     return null;
   }
   if (typeof input.repository !== "string" || !input.repository.trim() || input.repository.length > 240) {
@@ -658,6 +706,27 @@ function validateContextToolArguments(name: ContextToolName, input: JsonObject):
 
 function compileMaterialTool(input: JsonObject) {
   const question = (input.question as string).trim();
+  const suppliedContext = isRecord(input.sourceContext) ? input.sourceContext : undefined;
+  const sourceMode = suppliedContext?.kind === "public_github_excerpts"
+    ? "public_github_excerpts" as const
+    : "direct_upload" as const;
+  if (questionRequiresRepositoryScope(question) && sourceMode !== "public_github_excerpts") {
+    throw new McpContextError(
+      "A repository-wide question requires an explicit public GitHub repository and selected project scope. Call continuity_inspect_public_repository first; do not infer ‘this repository’ from ambient ChatGPT or Codex context.",
+      "repository_scope_receipt_required",
+    );
+  }
+  let repositoryReceipt: RepositoryScopeReceipt | null = null;
+  if (sourceMode === "public_github_excerpts") {
+    const documents = (input.documents as unknown[]).map((document) => isRecord(document)
+      ? { name: typeof document.name === "string" ? document.name : "", text: typeof document.text === "string" ? document.text : "" }
+      : { name: "", text: "" });
+    const validation = validateRepositoryScopeReceipt(suppliedContext?.receipt, documents);
+    if (!validation.ok) {
+      throw new McpContextError(validation.message, "repository_scope_mismatch");
+    }
+    repositoryReceipt = validation.receipt;
+  }
   const packet = buildMcpContextPacket({
     documents: input.documents,
     claims: input.claims,
@@ -696,10 +765,19 @@ function compileMaterialTool(input: JsonObject) {
   }
   const groupResolution = new Map(packet.entityCandidateGroups.flatMap((group) =>
     group.candidateIds.map((candidateId) => [candidateId, group.resolution] as const)));
+  const entityPackage = buildContinuityEntityPackage(packet);
   const structuredContent = {
     contractVersion: CONTINUITY_MCP_CONTRACT_VERSION,
     routerVersion: AUTHORITY_ROUTER_VERSION,
-    sourceKind: "uploaded_text" as const,
+    sourceKind: sourceMode === "public_github_excerpts" ? "public_github_excerpts" as const : "uploaded_text" as const,
+    sourceContext: repositoryReceipt
+      ? {
+          kind: sourceMode,
+          repository: repositoryReceipt.repository,
+          pinnedCommit: repositoryReceipt.pinnedCommit,
+          scope: repositoryReceipt.scope,
+        }
+      : { kind: sourceMode, repository: null, pinnedCommit: null, scope: null },
     question,
     route: {
       path: route.path,
@@ -737,6 +815,7 @@ function compileMaterialTool(input: JsonObject) {
       locator: candidate.locator,
       authority: candidate.authority.level,
     })),
+    entityPackage,
     relations: packet.relations,
     conflicts: packet.conflicts.map((conflict) => ({
       id: conflict.id,
@@ -756,7 +835,7 @@ function compileMaterialTool(input: JsonObject) {
   return {
     content: [{
       type: "text",
-      text: `Prepared ${structuredContent.claims.length} verified claim(s), ${structuredContent.entities.length} entity candidate(s), and ${structuredContent.relations.length} exact-span relation(s). Project-corpus coverage remains open.`,
+      text: `Prepared ${structuredContent.claims.length} verified claim(s), ${structuredContent.entities.length} entity candidate(s), and ${structuredContent.relations.length} exact-span relation(s). Entity package ${entityPackage.version} contains ${entityPackage.mentions.length} evidence-bearing mention(s), ${entityPackage.ambiguitySets.length} ambiguity set(s), and ${entityPackage.qa.warnings} QA warning(s). Project-corpus coverage remains open.`,
     }],
     structuredContent,
     isError: false,
@@ -797,6 +876,18 @@ async function inspectRepositoryTool(input: JsonObject) {
   } finally {
     publicRepositoryCallsInFlight = Math.max(0, publicRepositoryCallsInFlight - 1);
   }
+  const scopeReceipt = inspection.scope.selected
+    ? buildRepositoryScopeReceipt({
+        repository: inspection.repository.fullName,
+        pinnedCommit: inspection.pinnedCommit,
+        scope: {
+          id: inspection.scope.selected.id,
+          label: inspection.scope.selected.label,
+          rootPath: inspection.scope.selected.rootPath,
+        },
+        excerpts: inspection.excerpts,
+      })
+    : null;
   const structuredContent = {
     contractVersion: CONTINUITY_MCP_CONTRACT_VERSION,
     routerVersion: AUTHORITY_ROUTER_VERSION,
@@ -812,6 +903,7 @@ async function inspectRepositoryTool(input: JsonObject) {
       requestedScope: inspection.scope.requestedScope,
       reason: inspection.scope.reason,
     },
+    scopeReceipt,
     coverage: {
       membershipPinned: inspection.membershipCoverage.pinned,
       treeComplete: inspection.membershipCoverage.treeComplete,
@@ -831,7 +923,8 @@ async function inspectRepositoryTool(input: JsonObject) {
     diagnostics: [
       "This was an anonymous read of a public repository; no GitHub or OpenAI credential was accepted or used.",
       "The commit is pinned, but the excerpt set is question-scoped and cannot prove a universal absence in the repository.",
-      "For exact entity resolution or causal verification, call continuity_compile_material with the returned excerpts and exact-span proposals.",
+      "For exact entity resolution or causal verification, call continuity_compile_material with the returned excerpts unchanged, sourceContext kind public_github_excerpts, and the returned scopeReceipt.",
+      "The scope receipt binds repository, pinned commit, selected project scope, and exact excerpt text. It detects mixing or mutation but is not authentication and grants no canon authority.",
       ...(inspection.scope.candidates.some((candidate) => candidate.origin === "repository_declared")
         ? ["Repository-declared project scopes guide selection only; they do not grant canon authority or complete coverage."]
         : []),

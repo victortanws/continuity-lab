@@ -249,7 +249,9 @@ export type McpContextErrorCode =
   | "total_bytes_limit"
   | "proposal_limit"
   | "repository_limit"
-  | "repository_invalid_response";
+  | "repository_invalid_response"
+  | "repository_scope_receipt_required"
+  | "repository_scope_mismatch";
 
 export class McpContextError extends Error {
   constructor(message: string, readonly code: McpContextErrorCode) {
@@ -718,13 +720,15 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
   }
   const entityCandidateGroups = [...groupMap.entries()].map(([id, candidates]) => {
     const explicit = candidates.every((candidate) => candidate.resolution === "source_scoped_explicit");
+    const distinctReferents = new Set(candidates.map((candidate) => candidate.referentKey)).size;
     return {
       id,
       normalizedMention: normalized(candidates[0].mention),
       candidateIds: candidates.map((candidate) => candidate.id).sort(),
       resolution: (
-        candidates.length > 1 ? "ambiguous"
-          : explicit ? "source_scoped_explicit"
+        explicit && distinctReferents === 1 ? "source_scoped_explicit"
+          : candidates.length > 1 ? "ambiguous"
+            : explicit ? "source_scoped_explicit"
             : "single_unresolved"
       ) as "ambiguous" | "single_unresolved" | "source_scoped_explicit",
     };

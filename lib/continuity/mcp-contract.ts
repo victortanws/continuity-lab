@@ -1,3 +1,5 @@
+import { REPOSITORY_SCOPE_RECEIPT_JSON_SCHEMA } from "./repository-scope-receipt";
+
 /**
  * Transport-neutral contract shared by the reviewed-sample MCP transport and
  * future authenticated workspace transports. Provider identifiers never
@@ -101,13 +103,22 @@ export const continuityMcpTools = {
     },
   },
   continuity_compile_material: {
-    description: "Use after the user uploads or pastes material. Verify ChatGPT-proposed exact surface spans, entity mentions, and optional evidence-bound relations; preserve ambiguity and source disagreement; and return a bounded question-scoped context receipt. Claim subject, predicate, and non-empty object must be copied byte-for-byte from the quote in that order; an empty object requires frameArity intransitive and one terminal predicate token. A relation requires an exact cue and two accepted endpoint spans inside one accepted supporting claim. The tool is stateless, keyless, and never promotes uploaded text to project canon.",
+    description: "Use after the user uploads or pastes material, or after continuity_inspect_public_repository returns bounded excerpts and a scope receipt. Verify ChatGPT-proposed exact surface spans, entity mentions, and optional evidence-bound relations; preserve ambiguity and source disagreement; and return a bounded question-scoped context receipt plus an evidence-bearing entity package for machine handoff. Repository-wide questions require sourceContext kind public_github_excerpts and the unchanged receipt; do not infer 'this repository' from ambient ChatGPT or Codex context. Claim subject, predicate, and non-empty object must be copied byte-for-byte from the quote in that order; an empty object requires frameArity intransitive and one terminal predicate token. A relation requires an exact cue and two accepted endpoint spans inside one accepted supporting claim. The tool is stateless, keyless, and never promotes supplied text to project canon.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["question", "documents"],
       properties: {
         question: { type: "string", minLength: 1, maxLength: 8_000 },
+        sourceContext: {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind"],
+          properties: {
+            kind: { type: "string", enum: ["direct_upload", "public_github_excerpts"] },
+            receipt: REPOSITORY_SCOPE_RECEIPT_JSON_SCHEMA,
+          },
+        },
         documents: {
           type: "array",
           minItems: 1,
@@ -225,7 +236,7 @@ export const continuityMcpTools = {
     },
   },
   continuity_inspect_public_repository: {
-    description: "Use when the user supplies a public GitHub repository and a canon question. Discover independent project roots and declared evidence domains before selecting excerpts. If there are multiple project scopes, return the choices and ask the user to select one with projectScope. After scope resolution, pin one immutable commit and return a small safe set of question-relevant excerpts. For exact entity or causal verification, pass those excerpts to continuity_compile_material. Private repositories are not accessed.",
+    description: "Use for any question about a public GitHub repository. An explicit GitHub URL or owner/repository value is required; if the user says only 'this repository', ask them for the URL instead of using ambient ChatGPT or Codex files. Discover independent project roots and declared evidence domains before selecting excerpts. If there are multiple project scopes, return the named choices and ask the user to select one with projectScope. After scope resolution, pin one immutable commit and return a small safe set of question-relevant excerpts plus a scope receipt. For exact entity or causal verification, pass the excerpts and unchanged receipt to continuity_compile_material. Private repositories are not accessed.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

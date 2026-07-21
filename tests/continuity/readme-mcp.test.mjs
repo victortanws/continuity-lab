@@ -22,8 +22,9 @@ test("README and MVP explain the public MCP entry point and compatibility bounda
   assert.match(readme, /docs\/STORY-CANON\.md/);
   assert.match(readme, /routing clue, not automatic\s+proof/i);
   assert.match(readme, /does not require\s+you or the user to put an OpenAI API\s+key/i);
-  assert.match(readme, /The public transport remains MCP `2025-06-18`/);
+  assert.match(readme, /public transport negotiates current and supported legacy MCP protocol/i);
   assert.match(readme, /`continuity\.mcp\.v1`/);
+  assert.match(readme, /`continuity\.entity-package\.v1`/);
   assert.match(readme, /cannot.*automatically inherit.*attachment.*Git checkout/is);
 
   assert.match(page, /Settings → Security and login/);

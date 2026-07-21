@@ -449,17 +449,35 @@ replace the trusted transition registry required for reachability proof.
 `continuity_inspect_public_repository` performs one anonymous, commit-pinned,
 question-scoped GitHub read. It resolves a project scope before returning
 bounded excerpts; ambiguous generic questions return scope choices rather than
-mixed evidence. Exact claims from those excerpts must still pass through the
-compiler. None invokes
+mixed evidence. A resolved inspection also returns an unsigned integrity
+receipt binding the canonical repository name, pinned commit, selected scope,
+and exact excerpt fingerprints. Exact claims from those excerpts must pass
+through the compiler with that receipt. Repository-wide compilation without a
+receipt, a modified receipt, changed excerpt text, omitted excerpts, or an
+extra cross-scope file fails closed. Direct uploads retain the cheaper path and
+do not require a repository receipt. The receipt prevents accidental boundary
+drift; because it is not signed, it neither authenticates the caller nor grants
+source authority. None invokes
 an OpenAI API model, accepts a GitHub/OpenAI token, writes project state, or
 promotes source assertions to canon.
 
 The transport contract is `continuity.mcp.v1`, independent of authority-router
 version metadata. This keeps the v3.2 tool names stable while later routers add
-capabilities. Router v3.5 adds only an optional `projectScope` repository input
-and an explicit scope receipt. A production private-workspace integration still needs
+capabilities. Router v3.5 added the optional `projectScope` repository input and
+pre-retrieval scope selection. Router v3.6 binds that selected scope across the
+inspector and compiler calls with the repository scope receipt. A production
+private-workspace integration still needs
 connector authentication and per-project authorization, stable resource
 handlers, durable quotas, consented mutation tools, and deployment monitoring.
+
+Router v3.6 leaves that routing order intact and adds an evidence-bearing entity
+package to `continuity_compile_material`. Existing compact entity results remain
+available. The additive package separates source occurrences from entity
+candidates, declares its UTF-16 offset convention, retains exact quotations and
+source fingerprints, uses a controlled top-level ontology with extensible
+subtypes, and returns deterministic QA and action-safety flags. Unresolved names
+are represented as distinct candidates; only exact source-scoped identifiers
+may consolidate repeated mentions without further identity evidence.
 
 ## External-validity gate
 

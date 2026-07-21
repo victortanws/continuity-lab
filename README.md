@@ -83,6 +83,16 @@ To connect it:
 4. Start a new chat, choose **+ → More → Continuity Lab**, then ask a question
    normally.
 
+For a repository question, include the public GitHub URL in the message. Do not
+ask only “What is canon in this repository?” ChatGPT can have other files or a
+different working folder in view, and selecting the app does not tell
+Continuity Lab which one you mean. A safe first question looks like:
+
+> In `https://github.com/owner/repository`, what is considered canon?
+
+If that repository contains several products, stories, or examples, Continuity
+Lab will return their names and ask you to choose one before it reads evidence.
+
 The MCP path lets ChatGPT provide the conversation while Continuity Lab checks
 quotations, identities, disagreements, and stated relationships. It does not
 ask the user to paste an OpenAI API key into Continuity Lab. These steps follow
@@ -99,6 +109,10 @@ the current [OpenAI Apps SDK connection guide](https://developers.openai.com/app
 - **Entity:** a person, character, place, event, rule, item, organization, or
   other thing mentioned in the material. In the public interface we usually
   call these “people and things.”
+- **Mention:** one exact occurrence of a name or description in a source. A
+  mention is not automatically an entity: two occurrences of “Grandma” may
+  refer to different people, while “Mara” and “Captain Mara” may refer to the
+  same person when an exact ID or identity statement proves it.
 - **Entity resolution:** deciding whether two names refer to the same thing.
   Continuity Lab is allowed to say “possibly” or “ambiguous” instead of forcing
   a bad merge.
@@ -112,6 +126,10 @@ the current [OpenAI Apps SDK connection guide](https://developers.openai.com/app
 - **Pinned version:** the exact repository version used for an answer. Saving
   that version prevents later code changes from silently changing what an old
   answer referred to.
+- **Scope receipt:** a small machine-readable record binding a public repository,
+  pinned commit, selected project, and returned excerpts. It prevents the next
+  tool call from accidentally adding, dropping, changing, or mixing files. It
+  is an integrity check, not proof that a file is authoritative canon.
 - **Coverage:** how much of the relevant material was actually checked. “Not
   found in the retrieved passages” is weaker than “not present in a complete,
   reviewed list.”
@@ -317,6 +335,10 @@ the product:
   one accepted positive causal, normative, or historical claim contains the
   exact cue and both endpoint spans. These edges are source assertions for
   navigation, not automatic proof that an event is reachable.
+  When a question is about a repository as a whole, the compiler accepts the
+  excerpts only with `sourceContext.kind=public_github_excerpts` and the
+  unchanged scope receipt returned by the repository inspector. A direct
+  upload remains the lightweight default and needs no repository receipt.
 - `continuity_inspect_public_repository` is one current acquisition connector.
   It pins a public GitHub repository to one commit, discovers independent
   project roots and declared evidence domains, and then returns a small safe
@@ -326,8 +348,10 @@ the product:
   and question clues to look first for likely intent sources—story bibles,
   canon files, contracts, decision records, and specifications—and then for
   relevant implementation and tests. ChatGPT can pass those excerpts into
-  `continuity_compile_material` for exact entity, conflict, or causal
-  inspection. Scope declarations and filenames are routing clues; they do not
+  `continuity_compile_material`, together with the returned scope receipt, for
+  exact entity, conflict, or causal inspection. The compiler rejects changed
+  excerpts and files from another scope. Scope declarations and filenames are
+  routing clues; they do not
   approve a repository file as project canon. Future authenticated
   repositories, document parsers, databases, ledgers, and media-description
   adapters can feed the same compiler boundary without changing the underlying
@@ -347,6 +371,15 @@ is authorized to read from the working tree. For an ordinary ChatGPT chat, give
 the app a public GitHub URL and a focused question. The current anonymous
 repository inspector does not access private repositories, branches outside
 the requested ref, or a developer's uncommitted local files.
+
+The phrase “this repository” is deliberately insufficient at the connector
+boundary. The MCP cannot reliably know whether it means the repository hosting
+Continuity Lab, a nested Vibe Code Simulator example, the surrounding Slap the
+Heavens working tree, or another repository visible to ChatGPT. Supply the
+public URL. Repository inspection returns a selected-scope receipt, and exact
+compilation must carry that receipt forward unchanged. The receipt is
+deterministic and unsigned: it catches accidental mixing and mutation, but it
+does not authenticate a caller or grant canon authority.
 
 The MCP itself accepts text packets, not raw binary attachments. TXT, Markdown,
 JSON, YAML, XML, CSV/TSV, and extracted text from other formats work when the
@@ -387,21 +420,54 @@ flattened into misleading edges. This is not yet a durable whole-corpus
 knowledge graph, alternative-path solver, or automatic natural-language
 causality theorem prover.
 
-### Router v3.5 compatibility
+### Router v3.6 compatibility
 
-The public transport remains MCP `2025-06-18`, and its stable data contract is
-`continuity.mcp.v1`. Authority-router version `3.5.0` is advertised separately
+The public transport negotiates current and supported legacy MCP protocol
+versions, and its stable data contract remains `continuity.mcp.v1`.
+Authority-router version `3.6.0` is advertised separately
 as namespaced tool metadata, so router changes do not rename tools or resource
 identities. The three v3.2 reviewed-sample tools keep their existing names,
 inputs, and output shape; v3.3 added the two context tools, v3.4 added a
 server-authored proof contract and target-prioritized context capsule, and v3.5
-adds project-boundary resolution before repository retrieval. The public
-repository tool gains an optional `projectScope` input and a scope receipt;
+added project-boundary resolution before repository retrieval. Version 3.6
+adds an evidence-bearing `entityPackage` to the upload compiler result while
+retaining the compact `entities` array used by older consumers. The package
+separates canonical candidates from their exact source occurrences and includes
+the controlled ontology, ambiguity sets, provenance, and deterministic QA
+receipt needed for machine handoff. It never promotes an upload to project
+canon. The public
+repository tool has an optional `projectScope` input and now returns the scope
+receipt that the compiler requires for repository-wide questions;
 the five tool names and v1 contract remain stable. Tests exercise
 initialization, all five descriptors, the original VCS calls, exact upload
 verification, anonymous commit pinning, and the $47,000 regression. Clients
 should branch on advertised capabilities and `contractVersion`, not parse the
 router version from prose.
+
+### Machine-readable entity handoff
+
+`continuity_compile_material` returns two entity views. `entities` is the
+compact compatibility view. `entityPackage` uses
+`continuity.entity-package.v1`, the evidence-bearing v3.6 view for an agent or
+data pipeline. It contains:
+
+- `entities`: source-scoped resolved entities and unresolved candidates;
+- `mentions`: every accepted surface occurrence with document ID, exact quote,
+  locator, evidence fingerprint, and zero-based half-open UTF-16 offsets;
+- `ambiguitySets`: same-surface candidates that must not be merged silently;
+- `relations`: admitted exact-span source assertions between claims;
+- `ontology`: a small controlled top-level vocabulary with project-specific
+  meaning retained in subtypes;
+- `provenance`: source fingerprints, router/context versions, and coverage;
+  and
+- `qa`: structural and semantic invariants, unresolved identities, rejected
+  proposals, and explicit automatic-action limits.
+
+The QA receipt distinguishes “validly serialized” from “safe to merge.” Even a
+package with no structural failures remains unsafe for automatic identity
+merging when ambiguity, unresolved mentions, source disagreement, or rejected
+proposals remain. Every upload remains unsafe for automatic project-canon
+promotion because packet-relative assertions are not approval.
 
 ### Runtime shape
 
