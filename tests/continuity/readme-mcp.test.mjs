@@ -12,7 +12,7 @@ test("README and MVP explain the public MCP entry point and compatibility bounda
   assert.match(readme, /^## Quick start guide$/m);
   assert.match(readme, /^## How we collaborated with Codex$/m);
   assert.match(readme, /^## For the Technical-Minded$/m);
-  assert.match(readme, /https:\/\/continuity-lab-vcs\.synthesys\.chatgpt\.site\/mcp/);
+  assert.match(readme, /https:\/\/continuity-lab-vcs\.synthesys\.chatgpt\.site\/api\/mcp/);
   assert.match(readme, /public, read-only, and ready/i);
   assert.match(readme, /continuity_compile_material/);
   assert.match(readme, /continuity_inspect_public_repository/);
@@ -30,7 +30,7 @@ test("README and MVP explain the public MCP entry point and compatibility bounda
   assert.match(page, /Settings → Plugins/);
   assert.match(page, /Ready to connect/);
   assert.match(page, /This MCP address is public so ChatGPT can reach it/);
-  assert.match(page, /continuity-lab-vcs\.synthesys\.chatgpt\.site\/mcp/);
+  assert.match(page, /continuity-lab-vcs\.synthesys\.chatgpt\.site\/api\/mcp/);
   assert.match(page, /Version to use/);
   assert.match(page, /A branch, release tag, or commit ID/);
   assert.match(page, /Find the project&apos;s source of truth/);

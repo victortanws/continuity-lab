@@ -650,7 +650,7 @@ function GitHubPanel({ repository, repositoryUrl, repositoryRef, setRepositoryUr
 }
 
 function McpPanel() {
-  const endpoint = "https://continuity-lab-vcs.synthesys.chatgpt.site/mcp";
+  const endpoint = "https://continuity-lab-vcs.synthesys.chatgpt.site/api/mcp";
   const [copied, setCopied] = useState(false);
   async function copyEndpoint() {
     await navigator.clipboard.writeText(endpoint);
