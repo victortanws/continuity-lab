@@ -25,8 +25,10 @@ test("server-renders the Continuity Lab MVP", async () => {
   assert.match(html, /game development and continuity/);
   assert.match(html, /How it works/);
   assert.match(html, /Show the example/);
-  assert.match(html, /Add my project/);
-  assert.match(html, /Try Continuity Lab today!/);
+  assert.match(html, /Try in ChatGPT/);
+  assert.match(html, /Connect to ChatGPT/);
+  assert.match(html, /Try your material/);
+  assert.match(html, /Try a repository/);
   assert.match(html, /continuity-lab-plugin-icon\.png/);
   assert.match(html, /Guide autonomous development/);
   assert.match(html, /Vibe Code Simulator/);
@@ -42,6 +44,9 @@ test("server-renders the Continuity Lab MVP", async () => {
   assert.doesNotMatch(html, /Grandma Asset Record/);
   assert.doesNotMatch(html, /How should this document be read/);
   assert.doesNotMatch(html, /Use my files/);
+  assert.doesNotMatch(html, /Upload up to 12 sources/);
+  assert.doesNotMatch(html, /Public repository URL/);
+  assert.doesNotMatch(html, /Run this exact question live/);
   assert.doesNotMatch(html, /demo evaluator active/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
 });
@@ -51,6 +56,9 @@ test("the ChatGPT panel exposes the dependency-tracing demonstration", async () 
   assert.match(source, /Trace every dependency required before Grandma/);
   assert.match(source, /The MCP returns the same cited entities and dependency chain/);
   assert.match(source, /continuity-lab-plugin-icon\.png/);
+  assert.match(source, /Bring a file into ChatGPT—not into this website/);
+  assert.match(source, /Ask about a public GitHub repository in ChatGPT/);
+  assert.match(source, /visitors cannot spend the creator/);
 });
 
 test("the built worker exposes the Sites-compatible MCP alias", async () => {

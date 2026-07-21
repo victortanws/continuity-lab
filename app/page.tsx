@@ -236,15 +236,6 @@ export default function Home() {
     : workspaceEvidenceCount
       ? `Your project · ${workspaceEvidenceCount} source item${workspaceEvidenceCount === 1 ? "" : "s"}`
       : "Your project · add files to begin";
-  const canRunReviewedLive = Boolean(
-    analysisReceipt
-    && analysisReceipt.projectMode === "sample"
-    && analysisReceipt.question === DEFAULT_QUESTION
-    && analysisReceipt.timeScope === REVIEWED_EXAMPLE_RECEIPT.timeScope
-    && analysisReceipt.temporalAxis === "day"
-    && analysisReceipt.storyPosition === 8
-    && analysisReceipt.targetPosition === 8,
-  );
   const canDownloadWorkspaceResults = Boolean(
     hasAnalyzed
     && analysisReceipt?.projectMode === "workspace"
@@ -504,14 +495,9 @@ export default function Home() {
     void analyze(nextQuestion, "demo", receipt);
   }
 
-  function selectWorkspace() {
-    setProjectMode("workspace");
-    setSourcePanel(repository.phase === "ready" ? "github" : "upload");
-    setHasAnalyzed(false);
-    setAnalysisReceipt(null);
-    setAnswer(EMPTY_ANSWER);
-    setEngineMode("ready");
-    setShowFullTrace(false);
+  function openChatGPTPath(panel: SourcePanel = "mcp") {
+    setProjectMode("sample");
+    setSourcePanel(panel);
     window.requestAnimationFrame(() => document.getElementById("sources")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -544,15 +530,15 @@ export default function Home() {
         <div className="hero-image" aria-hidden="true" />
         <div className="hero-inner">
           <div className="hero-copy-block">
-            <div className="eyebrow">STORY QUESTIONS, ANSWERED FROM YOUR OWN MATERIAL</div>
+            <div className="eyebrow">STORY QUESTIONS, GROUNDED IN MATERIAL YOU CHOOSE</div>
             <h1>Towards a new paradigm in<br/><em>game development and continuity.</em></h1>
-            <p>Add your script, notes, or public game repository. Ask what is true, what can happen next, or what else must change if you edit a character, rule, cost, scene, or ending. Continuity Lab answers in plain language and shows the sources it used.</p>
+            <p>See a reviewed example here, then bring your own script, notes, or public game repository into ChatGPT through the read-only Continuity Lab MCP. Ask what is true, what can happen next, or what else must change—and see the sources behind the answer.</p>
           </div>
 
           <div className="question-card">
             <div className="mode-row">
               <button className={projectMode === "sample" ? "active" : ""} onClick={() => showReviewedExample()}><span/> Show the example</button>
-              <button className={projectMode === "workspace" ? "active" : ""} onClick={selectWorkspace}><span/> {workspaceEvidenceCount ? "Use my project" : "Add my project"}</button>
+              <button onClick={() => openChatGPTPath("mcp")}><span/> Try in ChatGPT</button>
             </div>
             <label htmlFor="continuity-question">Ask about the story or a planned change</label>
             <textarea id="continuity-question" value={question} onChange={(event) => setQuestion(event.target.value)} />
@@ -569,16 +555,16 @@ export default function Home() {
       <section className="sources-section" id="sources">
         <div className="section-intro">
           <div><div className="eyebrow dark">QUICK START</div><h2>How it works</h2></div>
-          <p>Run the worked example here, add project material, or connect a public GitHub repository. For the Build Week demonstration, connect the MCP to ChatGPT and ask the same evidence-grounded questions in conversation.</p>
+          <p>Run the worked example here. To use your own material, connect the read-only MCP to ChatGPT, attach a file or name a public GitHub repository, and ask the same evidence-grounded questions in conversation.</p>
         </div>
 
         <div className="pipeline" aria-label="Continuity Lab processing pipeline">
-          {["Add your material", "Ask a question", "See the answer, sources, and next steps"].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong>{index < 2 && <i>→</i>}</div>)}
+          {["Connect Continuity Lab", "Bring a file or public repository", "Ask and inspect the cited answer"].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong>{index < 2 && <i>→</i>}</div>)}
         </div>
 
         <div className="source-workspace">
           <div className="source-tabs" role="tablist">
-            {(["sample", "upload", "github", "mcp"] as SourcePanel[]).map((tab) => <button key={tab} role="tab" aria-selected={sourcePanel === tab} className={sourcePanel === tab ? "active" : ""} onClick={() => setSourcePanel(tab)}>{tab === "sample" ? "Worked example" : tab === "upload" ? "Upload material" : tab === "github" ? "Connect GitHub" : "Try Continuity Lab today!"}</button>)}
+            {(["sample", "upload", "github", "mcp"] as SourcePanel[]).map((tab) => <button key={tab} role="tab" aria-selected={sourcePanel === tab} className={sourcePanel === tab ? "active" : ""} onClick={() => setSourcePanel(tab)}>{tab === "sample" ? "Worked example" : tab === "upload" ? "Try your material" : tab === "github" ? "Try a repository" : "Connect to ChatGPT"}</button>)}
           </div>
 
           <div className="source-panel">
@@ -586,20 +572,10 @@ export default function Home() {
               <SamplePanel onAsk={showReviewedExample}/>
             )}
             {sourcePanel === "upload" && (
-              <UploadPanel sources={sources} isUploading={isUploading} onChange={addSource} onPaste={addPastedSource}/>
+              <TryMaterialPanel onConnect={() => setSourcePanel("mcp")}/>
             )}
             {sourcePanel === "github" && (
-              <GitHubPanel
-                repository={repository}
-                repositoryUrl={repositoryUrl}
-                repositoryRef={repositoryRef}
-                repositoryScope={repositoryScope}
-                repositoryScopeChoices={repositoryScopeChoices}
-                setRepositoryUrl={(value) => { setRepositoryUrl(value); setRepositoryScope(""); setRepositoryScopeChoices([]); }}
-                setRepositoryRef={(value) => { setRepositoryRef(value); setRepositoryScope(""); setRepositoryScopeChoices([]); }}
-                setRepositoryScope={setRepositoryScope}
-                onSubmit={syncRepository}
-              />
+              <TryRepositoryPanel onConnect={() => setSourcePanel("mcp")}/>
             )}
             {sourcePanel === "mcp" && <McpPanel/>}
           </div>
@@ -609,7 +585,7 @@ export default function Home() {
       <section className={`analysis-section ${hasAnalyzed ? "has-result" : ""}`} id="analysis">
         <div className="section-heading">
           <div><div className="eyebrow dark">ANSWER AND EXPLANATION</div><h2>{hasAnalyzed ? analyzedQuestion : "Your answer will appear here."}</h2></div>
-          <div className="section-heading-actions"><span className={`verdict ${answer.tone}`}><span/>{answer.status}</span>{canRunReviewedLive && <button className="live-test-icon" title="Run this exact question live" aria-label="Run this exact question live with the OpenAI API" onClick={() => void analyze(undefined, "live", analysisReceipt ?? undefined)} disabled={isAnalyzing}><Icon name="code" size={17}/></button>}</div>
+          <div className="section-heading-actions"><span className={`verdict ${answer.tone}`}><span/>{answer.status}</span></div>
         </div>
 
         {engineMode === "unavailable" && <div className="honesty-banner attention"><strong>Live answer unavailable</strong><span>{analysisReceipt?.projectMode === "sample" ? "The reviewed answer is still available. Add the OpenAI API key in Site settings only if you want to run the same question through GPT-5.6." : "Your material is still stored. Add the OpenAI API key in Site settings to search it and answer with GPT-5.6."}</span></div>}
@@ -683,6 +659,20 @@ export default function Home() {
 
 function SamplePanel({ onAsk }: { onAsk: (question?: string) => void }) {
   return <div className="sample-panel"><div className="source-symbol coral"><Icon name="branch" size={23}/></div><div><span className="panel-kicker">WORKED EXAMPLE</span><h3>Vibe Code Simulator</h3><p>The full story promises that the Founder will eventually pay $47,000 for Grandma&apos;s operation. The playable prototype currently covers only Days 7–8, starts with $700, and cannot reach that outcome. This reviewed snapshot also preserves the real portrait mismatch Continuity Lab found, so the demonstration can show the diagnosis, the dependency trace, and the corrected USER_0047 binding as a before-and-after.</p><div className="sample-question-list">{SUGGESTED_QUESTIONS.map((question) => <button key={question} onClick={() => onAsk(question)}>{question}<Icon name="arrow" size={14}/></button>)}</div></div><button className="outline-button" onClick={() => onAsk()}>Show the main answer <Icon name="arrow" size={16}/></button></div>;
+}
+
+function TryMaterialPanel({ onConnect }: { onConnect: () => void }) {
+  return <div className="try-panel">
+    <div className="try-copy"><span className="source-symbol blue"><Icon name="file" size={23}/></span><span className="panel-kicker">TRY WITH YOUR OWN MATERIAL</span><h3>Bring a file into ChatGPT—not into this website.</h3><p>Attach a story bible, script, specification, notes, or Gutenberg text to a ChatGPT conversation with Continuity Lab enabled. ChatGPT selects the question-relevant passages; the MCP checks exact claims, identities, relationships, dependencies, and uncertainty.</p><div className="trust-note"><strong>Your account, your conversation.</strong><p>The public site does not ask for an OpenAI API key and visitors cannot spend the creator&apos;s API credits.</p></div></div>
+    <div className="try-guide"><span className="panel-kicker">A GOOD FIRST TEST</span><ol><li><span>1</span><p>Connect Continuity Lab in ChatGPT.</p></li><li><span>2</span><p>Attach a text-based source and ask a focused continuity question.</p></li><li><span>3</span><p>Ask ChatGPT to show the exact evidence and unresolved ambiguities.</p></li></ol><div className="try-prompt"><span>COPY THIS PROMPT</span><p>“Using Continuity Lab, identify the important characters, goals, promises, and dependencies in the attached material. Then tell me what would conflict if I changed the protagonist&apos;s next decision.”</p></div><button className="dark-button" type="button" onClick={onConnect}>Connect Continuity Lab <Icon name="arrow" size={14}/></button></div>
+  </div>;
+}
+
+function TryRepositoryPanel({ onConnect }: { onConnect: () => void }) {
+  return <div className="try-panel">
+    <div className="try-copy"><span className="source-symbol ink"><Icon name="branch" size={23}/></span><span className="panel-kicker">TRY A PUBLIC REPOSITORY</span><h3>Ask about a public GitHub repository in ChatGPT.</h3><p>Give ChatGPT an explicit public GitHub URL. Continuity Lab pins one version, finds likely authority files, asks you to choose a project when the repository contains several, and returns bounded excerpts without running repository code.</p><div className="trust-note"><strong>Read-only and deliberately bounded.</strong><p>The public inspector reads a small, question-relevant slice. Private repositories and exhaustive absence claims are intentionally outside this demonstration.</p></div></div>
+    <div className="try-guide"><span className="panel-kicker">PUBLIC REPOSITORY PROMPT</span><div className="try-prompt"><span>COPY THIS PROMPT</span><p>“In https://github.com/victortanws/vibe-coder-sim, which sources define Grandma&apos;s operation, and what must happen before the Founder can reach and pay for it? Use Continuity Lab and cite the repository evidence.”</p></div><div className="mcp-safety"><strong>No shared API key</strong><p>ChatGPT supplies the conversational reasoning. The Continuity Lab MCP performs the read-only inspection and verification.</p></div><button className="dark-button" type="button" onClick={onConnect}>Connect Continuity Lab <Icon name="arrow" size={14}/></button></div>
+  </div>;
 }
 
 function UploadPanel({ sources, isUploading, onChange, onPaste }: { sources: StoredSource[]; isUploading: boolean; onChange: (event: ChangeEvent<HTMLInputElement>) => void; onPaste: (text: string) => Promise<boolean> }) {
