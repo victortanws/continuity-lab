@@ -2,6 +2,17 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   productionBrowserSourceMaps: false,
+  // Sites reliably dispatches dynamic handlers under /api/*. ChatGPT's app
+  // setup documentation asks creators for a public /mcp endpoint, so route
+  // that canonical address to the same stateless transport before filesystem
+  // routing. Keep /api/mcp as a backwards-compatible alias for existing apps.
+  async rewrites() {
+    return {
+      beforeFiles: [{ source: "/mcp", destination: "/api/mcp" }],
+      afterFiles: [],
+      fallback: [],
+    };
+  },
   async headers() {
     return [{
       source: "/(.*)",

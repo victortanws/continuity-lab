@@ -56,3 +56,28 @@ test("the built worker exposes the Sites-compatible MCP alias", async () => {
   assert.equal(body.result.tools[0].inputSchema.properties.projectId.default, "vcs-demo");
   assert.equal(body.result.tools[0].inputSchema.properties.projectRevision.default, "vcs-demo-r2");
 });
+
+test("the built worker exposes the canonical public MCP address", async () => {
+  const worker = await builtWorker();
+  const response = await worker.fetch(new Request("http://localhost/mcp", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "initialize",
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "chatgpt-connector-test", version: "1.0.0" },
+      },
+    }),
+  }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.result.protocolVersion, "2025-06-18");
+  assert.equal(body.result.capabilities.tools.listChanged, false);
+});

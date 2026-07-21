@@ -69,7 +69,7 @@ device.
 The hosted MCP address is public, read-only, and ready for ChatGPT to reach from
 its own servers:
 
-`https://continuity-lab-vcs.synthesys.chatgpt.site/api/mcp`
+`https://continuity-lab-vcs.synthesys.chatgpt.site/mcp`
 
 To connect it:
 
@@ -257,8 +257,8 @@ npm run build
 ```
 
 The project uses the existing vinext/Sites build and does not use
-`wrangler.jsonc`. The same hosted MCP implementation is available at `/api/mcp`
-and at `/mcp` for compatible direct-worker and local hosts.
+`wrangler.jsonc`. Use `/mcp` as the public ChatGPT address. `/api/mcp` remains a
+backwards-compatible hosted alias for clients that already saved it.
 
 To connect a deployed build to ChatGPT, follow the current
 [OpenAI Apps SDK connection guide](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt).
@@ -396,7 +396,7 @@ router version from prose.
 - `app/api/continuity/sources`: immutable uploaded source versions with a
   server-validated narrative/reference/proposal document type
 - `app/api/continuity/repositories`: commit-pinned GitHub snapshot sync and status
-- `app/api/mcp` (hosted alias) and `app/mcp` (direct-worker compatibility):
+- `app/api/mcp` (Sites transport) and `app/mcp` (canonical public address):
   stateless read-only MCP transport for the immutable reviewed VCS
   sample, exact-span text packets, and bounded anonymous public-GitHub excerpts;
   it does not expose arbitrary persisted or private workspaces
@@ -462,8 +462,8 @@ requires a trusted complete transition registry or reviewed adapter.
   observations; no raw image/OCR adapter and no browser/API route yet.
 - **GitHub:** bounded commit-pinned snapshot sync; no webhook, incremental
   GitHub App flow, or live working-tree mount.
-- **MCP:** an executable stateless `/api/mcp` hosted transport for five read-only
-  tools, with `/mcp` retained for compatible direct-worker and local hosts:
+- **MCP:** an executable stateless `/mcp` address for five read-only tools,
+  internally routed to the Sites-compatible `/api/mcp` transport:
   three over `vcs-demo-r2`, one exact-span text-packet compiler, and one bounded
   anonymous public-GitHub inspector. Authenticated persisted/private workspaces
   and resource handlers are not implemented.
