@@ -1905,11 +1905,48 @@ test("the VCS Day 8 to Day 24 trace preserves the promise and identifies the mis
   });
 
   assert.equal(result.answer.verdict, "UNREACHABLE");
-  assert.equal(result.answer.truthStatus, "supported");
+  assert.equal(result.answer.truthStatus, "contradicted");
   assert.equal(result.answer.timeScope, "Day 8 through Day 24");
   assert.ok(result.answer.dependencies.some((edge) => edge.claimKey === "producer:grandma-surgery-funded" && edge.status === "missing"));
   assert.ok(result.answer.dependencies.some((edge) => edge.claimKey === "consumer:grandma-surgery-funded"));
   assert.match(result.answer.answer, /no transition|payment path|cannot reach \$47,000/i);
+});
+
+test("a confident no does not support an unproved positive causal proposition across domains", () => {
+  const cases = [
+    {
+      question: "Is the configured software release publicly deployed?",
+      answer: "No. The deployment record was not included.",
+    },
+    {
+      question: "Did the museum transfer custody to the named receiver?",
+      answer: "No. The available excerpt does not establish the handoff.",
+    },
+  ];
+
+  for (const item of cases) {
+    const result = validateAnswer(answer({
+      question: item.question,
+      verdict: "INSUFFICIENT_EVIDENCE",
+      // Simulate the exact model error: high confidence in the wording "no"
+      // was incorrectly reported as support for the positive proposition.
+      truthStatus: "supported",
+      answer: item.answer,
+      confidence: "high",
+      reachability: {
+        status: "unknown",
+        completenessScope: "open evidence excerpt",
+        targetClaimKeys: [],
+        blockers: ["The transition is not established by the available material."],
+        assumptions: [],
+        path: [],
+      },
+    }), [], { ...REQUEST, question: item.question });
+
+    assert.equal(result.answer.verdict, "INSUFFICIENT_EVIDENCE", item.question);
+    assert.equal(result.answer.truthStatus, "unknown", item.question);
+    assert.notEqual(result.answer.truthStatus, "supported", item.question);
+  }
 });
 
 test("reachability reports an unmet producer prerequisite", () => {

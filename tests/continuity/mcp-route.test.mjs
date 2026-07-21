@@ -334,7 +334,23 @@ test("the three MCP tools execute deterministic VCS analysis without network or 
     }));
     assert.equal(trace.body.result.isError, false);
     assert.equal(trace.body.result.structuredContent.verdict, "UNREACHABLE");
+    assert.equal(trace.body.result.structuredContent.truthStatus, "contradicted");
     assert.equal(trace.body.result.structuredContent.reachability.status, "unreachable_within_scope");
+    assert.ok(trace.body.result.structuredContent.dependencies.some(
+      (edge) => edge.claimKey === "producer:founder-personal-funds-47000" && edge.status === "blocked",
+    ));
+    assert.ok(trace.body.result.structuredContent.dependencies.some(
+      (edge) => edge.claimKey === "producer:grandma-surgery-funded" && edge.status === "missing",
+    ));
+    assert.ok(trace.body.result.structuredContent.dependencies.some(
+      (edge) => edge.claimKey === "consumer:grandma-surgery-funded" && edge.status === "blocked",
+    ));
+    assert.ok(trace.body.result.structuredContent.proposal.requiredChanges.some(
+      (change) => /deducts \$47,000/i.test(change),
+    ));
+    assert.ok(trace.body.result.structuredContent.proposal.requiredChanges.some(
+      (change) => /reload|repeated payment/i.test(change),
+    ));
 
     const change = await call(toolCall(3, "continuity_analyze_change", {
       projectId: "vcs-demo",
@@ -356,11 +372,31 @@ test("a natural capability question escalates to the bounded VCS dependency proo
 
   assert.equal(result.body.result.isError, false);
   assert.equal(result.body.result.structuredContent.verdict, "UNREACHABLE");
+  assert.equal(result.body.result.structuredContent.truthStatus, "contradicted");
   assert.equal(result.body.result.structuredContent.reachability.status, "unreachable_within_scope");
   assert.ok(result.body.result.structuredContent.dependencies.some(
     (edge) => edge.claimKey === "producer:grandma-surgery-funded" && edge.status === "blocked",
   ));
   assert.match(result.body.result.structuredContent.answer, /completion path is missing|no transition/i);
+});
+
+test("the public MCP answers the central VCS build question with proof and a minimal repair", async () => {
+  const result = await call(toolCall("save-grandma", "continuity_answer_question", {
+    question: "Can the player actually save Grandma by Day 24 in the current version of the game?",
+  }));
+
+  assert.equal(result.body.result.isError, false);
+  const output = result.body.result.structuredContent;
+  assert.equal(output.verdict, "UNREACHABLE");
+  assert.equal(output.truthStatus, "contradicted");
+  assert.equal(output.reachability.status, "unreachable_within_scope");
+  assert.match(output.answer, /current playable prototype|current build|prototype/i);
+  assert.ok(output.citations.length >= 3);
+  assert.ok(output.dependencies.some((edge) =>
+    edge.claimKey === "producer:grandma-surgery-funded" && edge.status === "missing"));
+  assert.ok(output.proposal.requiredChanges.some((change) => /hospital-payment|hospital payment/i.test(change)));
+  assert.ok(output.proposal.requiredChanges.some((change) => /persist/i.test(change)));
+  assert.ok(output.proposal.requiredChanges.some((change) => /test/i.test(change)));
 });
 
 test("MCP rejects arbitrary workspaces and revisions as clear tool errors without syncing", async () => {

@@ -776,7 +776,7 @@ function sourceAnswer(request: QueryRequest, byId: Map<string, EvidenceChunk>): 
 function reachabilityAnswer(request: QueryRequest, byId: Map<string, EvidenceChunk>): ContinuityAnswer {
   return baseAnswer(request, {
     verdict: "UNREACHABLE",
-    truthStatus: "supported",
+    truthStatus: "contradicted",
     reachability: {
       status: "unreachable_within_scope",
       completenessScope: `The complete Days 7–8 economy and current trigger registry at ${VCS_DEMO_REVISION}, read alongside the story and ending contracts.`,

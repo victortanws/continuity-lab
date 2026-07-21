@@ -948,7 +948,11 @@ export function validateAnswer(
     SUPPORTED: "supported",
     CONFLICT: "conflicted",
     AMBIGUOUS: "ambiguous",
-    UNREACHABLE: "supported",
+    // UNREACHABLE is a supported *answer* of "no" to a positive feasibility
+    // question. The proposition being tested is contradicted within the typed,
+    // complete transition scope; it is not itself supported. If that proof is
+    // incomplete, the guards above and below downgrade the answer to unknown.
+    UNREACHABLE: "contradicted",
     INSUFFICIENT_EVIDENCE: "unknown",
     PROPOSAL: "proposed",
   };
