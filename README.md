@@ -355,6 +355,15 @@ the product:
   `domainProfile` is a separate schema-on-read proposal. It derives
   evidence-bearing candidate parameters and validators from the submitted
   packet, but every item remains inactive and requires review.
+  A second call may submit `knowledgeReview` with the exact returned
+  fingerprints and deterministic candidate IDs. The resulting
+  `reviewedKnowledge` receipt records accepted aliases, misspellings, distinct
+  entities, approved parameters, and approved validators without changing the
+  original mentions. `knowledgeSnapshot` binds the documents and all four
+  machine-readable packages so a later run can identify new, changed, and
+  unchanged inputs. The keyless MCP does not authenticate the claimed reviewer
+  or persist these receipts; a team must commit them to a governed repository
+  or store them through an authenticated workspace.
 - `continuity_inspect_public_repository` is one current acquisition connector.
   It pins a public GitHub repository to one commit, discovers independent
   project roots and declared evidence domains, and then returns a small safe
@@ -434,13 +443,16 @@ bound precondition, consequence, and before edges. Negative relationship
 claims and compound `or`/`unless` logic remain visible prose rather than being
 flattened into misleading edges. This is not yet a durable whole-corpus
 knowledge graph, alternative-path solver, or automatic natural-language
-causality theorem prover.
+causality theorem prover. The v3.8 snapshot is a portable integrity receipt and
+incremental comparison boundary, not hidden server memory. Public GitHub
+excerpts remain question-scoped, so a missing excerpt is never reported as a
+deleted repository fact.
 
-### Router v3.7 compatibility
+### Router v3.8 compatibility
 
 The public transport negotiates current and supported legacy MCP protocol
 versions, and its stable data contract remains `continuity.mcp.v1`.
-Authority-router version `3.7.0` is advertised separately
+Authority-router version `3.8.0` is advertised separately
 as namespaced tool metadata, so router changes do not rename tools or resource
 identities. The three v3.2 reviewed-sample tools keep their existing names,
 inputs, and output shape; v3.3 added the two context tools, v3.4 added a
@@ -458,7 +470,13 @@ retain the v3.6 matching behavior; callers may opt exact code symbols or opaque
 registry values into stricter identity profiles. The public
 repository tool has an optional `projectScope` input and now returns the scope
 receipt that the compiler requires for repository-wide questions;
-the five tool names and v1 contract remain stable. Tests exercise
+version 3.8 adds `reviewedKnowledge` and `knowledgeSnapshot`. Reviews are
+fingerprint-bound second-pass inputs. They cannot rewrite source evidence,
+merge different explicit IDs, or treat code spelling as binding evidence.
+Snapshots compare immutable document and package fingerprints while preserving
+an open project-corpus boundary. Both fields are additive; callers that omit
+review and snapshot inputs retain the v3.7 behavior. The five tool names and v1
+contract remain stable. Tests exercise
 initialization, all five descriptors, the original VCS calls, exact upload
 verification, anonymous commit pinning, and the $47,000 regression. Clients
 should branch on advertised capabilities and `contractVersion`, not parse the
@@ -508,6 +526,34 @@ suggest the dimensions that matter locally. The proposal covers only the
 submitted packet and question. It is never proof of an exhaustive corpus
 ontology and always returns `activated: false` and
 `safeForAutomaticActivation: false`.
+
+### Review decisions and long-running snapshots
+
+The first compile call is discovery. It returns stable identity-link,
+parameter, and validator IDs. After a person reviews them, the client can repeat
+the same compile call with a `knowledgeReview` envelope bound to the exact
+`identityLinks.packageFingerprint` and `domainProfile.profileFingerprint`.
+The review vocabulary distinguishes same entity, alias, misspelling, former
+name, title, translation, related concept, distinct entities, and rejected
+candidate. Different visible IDs cannot be joined through this lexical path.
+Case-sensitive symbols and opaque identifiers require a `parser_binding`
+basis. Fabricated evidence references and stale fingerprints fail closed.
+
+The receipt remains caller-attested because the public MCP uses no
+authentication. Consequently it is useful as a transparent reviewed
+projection but reports `projectCanon: false` and remains unsafe for unattended
+canon mutation. A repository maintainer can make it durable by storing the
+review envelope and returned receipt in an approved project path. A future
+authenticated workspace can attach actual reviewer identity and approval
+policy without changing the evidence or decision formats.
+
+`knowledgeSnapshot` uses `continuity.knowledge-snapshot.v1`. It records the
+source boundary, document fingerprints, entity package, identity links, domain
+profile, and reviewed-knowledge fingerprint. Supplying the previous receipt
+identifies reusable unchanged documents plus new and changed inputs. A caller
+may request removal comparison only for a direct-upload packet it declares
+complete. Repository excerpts always remain a delta, even between pinned
+commits, because question-focused retrieval is not a complete tree index.
 
 ### Runtime shape
 

@@ -1,4 +1,6 @@
 import { REPOSITORY_SCOPE_RECEIPT_JSON_SCHEMA } from "./repository-scope-receipt";
+import { PREVIOUS_KNOWLEDGE_SNAPSHOT_INPUT_SCHEMA } from "./knowledge-snapshot";
+import { REVIEWED_KNOWLEDGE_INPUT_JSON_SCHEMA } from "./reviewed-knowledge";
 
 /**
  * Transport-neutral contract shared by the reviewed-sample MCP transport and
@@ -103,7 +105,7 @@ export const continuityMcpTools = {
     },
   },
   continuity_compile_material: {
-    description: "Use after the user uploads or pastes material, or after continuity_inspect_public_repository returns bounded excerpts and a scope receipt. Verify ChatGPT-proposed exact surface spans, entity mentions, and optional evidence-bound relations; preserve ambiguity and source disagreement; and return a bounded question-scoped context receipt, an evidence-bearing entity package, suggest-only alias or typo candidates, and an inactive domain-profile proposal. Repository-wide questions require sourceContext kind public_github_excerpts and the unchanged receipt; do not infer 'this repository' from ambient ChatGPT or Codex context. Claim subject, predicate, and non-empty object must be copied byte-for-byte from the quote in that order; an empty object requires frameArity intransitive and one terminal predicate token. A relation requires an exact cue and two accepted endpoint spans inside one accepted supporting claim. Candidate identity links never merge entities, and proposed parameters never become governing schema without review. The tool is stateless, keyless, and never promotes supplied text to project canon.",
+    description: "Use after the user uploads or pastes material, or after continuity_inspect_public_repository returns bounded excerpts and a scope receipt. Verify ChatGPT-proposed exact surface spans, entity mentions, and optional evidence-bound relations; preserve ambiguity and source disagreement; and return a bounded context receipt, evidence-bearing entities, suggest-only identity links, an inactive domain-profile proposal, a reviewed-knowledge receipt, and a reusable snapshot receipt. Claim subject, predicate, and any non-empty object must be copied byte-for-byte from the quote in that order; an empty object requires frameArity intransitive and one terminal predicate token. A relation requires an exact cue and two accepted endpoint spans inside one accepted supporting claim. The first call proposes deterministic candidate IDs. A later call may resubmit the unchanged material with knowledgeReview bound to the returned identity and domain fingerprints. Reviewed decisions never rewrite source mentions, different explicit IDs cannot be merged lexically, code symbols require parser-binding evidence, and caller-attested review is not authenticated project canon. previousSnapshot enables bounded change comparison; repository excerpts never imply removal from the full repository. Repository-wide questions require sourceContext kind public_github_excerpts and the unchanged receipt. The tool remains keyless and does not persist decisions itself.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -235,6 +237,12 @@ export const continuityMcpTools = {
               cueOccurrence: { type: "integer", minimum: 1 },
             },
           },
+        },
+        knowledgeReview: REVIEWED_KNOWLEDGE_INPUT_JSON_SCHEMA,
+        previousSnapshot: PREVIOUS_KNOWLEDGE_SNAPSHOT_INPUT_SCHEMA,
+        snapshotMode: {
+          type: "string", enum: ["delta_packet", "complete_packet"],
+          description: "Use complete_packet only when the submitted direct-upload documents are the complete managed packet. Public GitHub excerpts are always treated as a delta and never prove removals.",
         },
       },
     },

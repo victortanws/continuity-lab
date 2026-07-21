@@ -31,6 +31,18 @@ import {
   DOMAIN_PROFILE_JSON_SCHEMA,
   DOMAIN_PROFILE_VERSION,
 } from "@/lib/continuity/domain-profile";
+import {
+  buildReviewedKnowledgeReceipt,
+  REVIEWED_KNOWLEDGE_JSON_SCHEMA,
+  REVIEWED_KNOWLEDGE_VERSION,
+  type ReviewedKnowledgeInput,
+} from "@/lib/continuity/reviewed-knowledge";
+import {
+  buildKnowledgeSnapshot,
+  KNOWLEDGE_SNAPSHOT_JSON_SCHEMA,
+  KNOWLEDGE_SNAPSHOT_VERSION,
+  type PreviousKnowledgeSnapshot,
+} from "@/lib/continuity/knowledge-snapshot";
 import { ConnectorExecutionBudget } from "@/lib/continuity/http/connector-execution";
 import { guardRequestBody, readJsonBodyBounded, RequestBodyError } from "@/lib/continuity/http/security";
 import {
@@ -226,7 +238,7 @@ const CONTEXT_TOOL_OUTPUT_SCHEMA = {
   additionalProperties: false,
   required: [
     "contractVersion", "routerVersion", "sourceKind", "sourceContext", "question", "route",
-    "coverage", "claims", "entities", "entityPackage", "identityLinks", "domainProfile", "relations", "conflicts", "graph", "rejected", "diagnostics",
+    "coverage", "claims", "entities", "entityPackage", "identityLinks", "domainProfile", "reviewedKnowledge", "knowledgeSnapshot", "relations", "conflicts", "graph", "rejected", "diagnostics",
   ],
   properties: {
     contractVersion: { type: "string", enum: [CONTINUITY_MCP_CONTRACT_VERSION] },
@@ -301,6 +313,8 @@ const CONTEXT_TOOL_OUTPUT_SCHEMA = {
     entityPackage: ENTITY_PACKAGE_JSON_SCHEMA,
     identityLinks: IDENTITY_LINK_PACKAGE_JSON_SCHEMA,
     domainProfile: DOMAIN_PROFILE_JSON_SCHEMA,
+    reviewedKnowledge: REVIEWED_KNOWLEDGE_JSON_SCHEMA,
+    knowledgeSnapshot: KNOWLEDGE_SNAPSHOT_JSON_SCHEMA,
     relations: {
       type: "array",
       items: {
@@ -483,7 +497,17 @@ export async function POST(request: Request): Promise<Response> {
       protocolVersion,
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "continuity-lab", version: "0.3.0" },
-      instructions: "Read-only, stateless continuity tools. The three reviewed-example tools apply only to the immutable Vibe Code Simulator example; they never synchronize a repository and must never answer what is true in an arbitrary folder, repository, or project. Never treat ambient ChatGPT attachments, Codex working-directory files, or the phrase 'this repository' as a repository selected through Continuity Lab. If a repository question lacks an explicit public GitHub URL or owner/repository value, ask the user for it. For any public GitHub repository question, call continuity_inspect_public_repository first. If it returns multiple project scopes, ask the user which named scope they mean and call it again with projectScope; never blend scopes. After resolution, pass the returned excerpts unchanged to continuity_compile_material with sourceContext kind public_github_excerpts and the returned scopeReceipt. For uploaded or pasted material, use sourceContext kind direct_upload, read only question-relevant text, propose exact quotes and entity mentions to continuity_compile_material, then answer from the verified receipt; rejected or absent claims remain unknown. In each claim, copy subject, predicate, and any non-empty object byte-for-byte from the quote in that order. Use frameArity intransitive with object \"\" only for a single copied predicate token that finishes the quoted clause; never discard an expressed object. Mark polarity negative only when the quote directly negates the claim. Omit explicitId unless that exact ID occurs in the entity quote. Use identityProfile case_sensitive_symbol for code symbols and opaque_identifier only for exact registry values. claimKind classifies a source assertion and never grants authority. For causal structure, optionally propose relations by original claim index: the supporting positive causal, normative, or historical claim must contain the exact cue and both accepted endpoint spans. Direction is prerequisite to dependent, trigger to effect, or earlier to later. Do not materialize negative, or/unless, or alternative-path logic as a simple edge; admitted edges aid navigation and are not reachability proofs. For downstream machine use, prefer entityPackage and obey its ambiguity sets and QA action-safety flags. identityLinks are suggest-only lexical candidates with uncalibrated scores; never apply them automatically. domainProfile is an inactive schema-on-read proposal; never treat its parameters or validators as governing until reviewed. A scope receipt is an integrity binding, not authentication or canon authority. Neither path promotes source assertions to project canon. Change analyses are proposals and never become canon.",
+      instructions: [
+        "Read-only continuity tools. The three reviewed-example tools apply only to the immutable Vibe Code Simulator example; they never synchronize an arbitrary repository.",
+        "Never treat ambient ChatGPT attachments, Codex working-directory files, or the phrase 'this repository' as a repository selected through Continuity Lab.",
+        "For a public GitHub question, require an explicit URL, call continuity_inspect_public_repository, resolve any named project scope, then pass its excerpts and unchanged scopeReceipt to continuity_compile_material.",
+        "For uploads, pass only question-relevant text. Copy subject, predicate, and any non-empty object byte-for-byte from the exact quote; rejected or absent claims remain unknown. Omit explicitId unless that exact ID occurs in the entity quote.",
+        "For downstream machine use, prefer entityPackage and obey its ambiguity sets and QA action-safety flags.",
+        "identityLinks are suggest-only lexical candidates with uncalibrated scores; never apply them automatically. domainProfile is an inactive schema-on-read proposal until a second compile call supplies knowledgeReview bound to the exact returned fingerprints.",
+        "Reviewed identity decisions preserve source forms, cannot lexically merge different explicit IDs, and require parser_binding for code or opaque symbols. The keyless server treats review authority as caller-attested rather than authenticated project canon.",
+        "knowledgeSnapshot can compare a prior receipt, but GitHub excerpts are always a delta and never prove that missing repository facts were removed. Persist reviewedKnowledge and knowledgeSnapshot in a governed repository or authenticated workspace for long-running agents.",
+        "A scopeReceipt and snapshot fingerprint provide integrity binding, not canon authority. Change analyses are proposals and never become canon.",
+      ].join(" "),
     });
   }
 
@@ -525,6 +549,8 @@ export async function POST(request: Request): Promise<Response> {
                 "continuity/entityPackageVersion": ENTITY_PACKAGE_VERSION,
                 "continuity/identityLinkPackageVersion": IDENTITY_LINK_PACKAGE_VERSION,
                 "continuity/domainProfileVersion": DOMAIN_PROFILE_VERSION,
+                "continuity/reviewedKnowledgeVersion": REVIEWED_KNOWLEDGE_VERSION,
+                "continuity/knowledgeSnapshotVersion": KNOWLEDGE_SNAPSHOT_VERSION,
               }
             : {}),
         },
@@ -678,7 +704,7 @@ function queryForTool(name: ReviewedToolName, input: JsonObject): QueryRequest {
 
 function validateContextToolArguments(name: ContextToolName, input: JsonObject): string | null {
   const allowed = name === "continuity_compile_material"
-    ? new Set(["question", "sourceContext", "documents", "claims", "entityMentions", "relations"])
+    ? new Set(["question", "sourceContext", "documents", "claims", "entityMentions", "relations", "knowledgeReview", "previousSnapshot", "snapshotMode"])
     : new Set(["repository", "question", "requestedRef", "projectScope"]);
   const unexpected = Object.keys(input).filter((key) => !allowed.has(key));
   if (unexpected.length) return `Unexpected argument${unexpected.length === 1 ? "" : "s"}: ${unexpected.join(", ")}.`;
@@ -703,6 +729,11 @@ function validateContextToolArguments(name: ContextToolName, input: JsonObject):
       if (input.sourceContext.kind === "public_github_excerpts" && input.sourceContext.receipt === undefined) {
         return "Public GitHub excerpts require the scope receipt returned by continuity_inspect_public_repository.";
       }
+    }
+    if (input.knowledgeReview !== undefined && !isRecord(input.knowledgeReview)) return "knowledgeReview must be an object.";
+    if (input.previousSnapshot !== undefined && !isRecord(input.previousSnapshot)) return "previousSnapshot must be an object.";
+    if (input.snapshotMode !== undefined && input.snapshotMode !== "delta_packet" && input.snapshotMode !== "complete_packet") {
+      return "snapshotMode must be delta_packet or complete_packet.";
     }
     return null;
   }
@@ -784,18 +815,36 @@ function compileMaterialTool(input: JsonObject) {
   const entityPackage = buildContinuityEntityPackage(packet);
   const identityLinks = buildIdentityLinkPackage(packet, entityPackage);
   const domainProfile = buildDomainProfileProposal(packet, entityPackage, question);
+  const reviewedKnowledge = buildReviewedKnowledgeReceipt(
+    packet,
+    entityPackage,
+    identityLinks,
+    domainProfile,
+    input.knowledgeReview as ReviewedKnowledgeInput | undefined,
+  );
+  const sourceBinding = repositoryReceipt
+    ? {
+        kind: sourceMode,
+        repository: repositoryReceipt.repository,
+        pinnedCommit: repositoryReceipt.pinnedCommit,
+        scope: repositoryReceipt.scope,
+      }
+    : { kind: sourceMode, repository: null, pinnedCommit: null, scope: null };
+  const knowledgeSnapshot = buildKnowledgeSnapshot({
+    packet,
+    entityPackage,
+    identityLinks,
+    domainProfile,
+    reviewedKnowledge,
+    sourceBinding,
+    previousSnapshot: input.previousSnapshot as PreviousKnowledgeSnapshot | undefined,
+    requestedMode: input.snapshotMode === "complete_packet" ? "complete_packet" : "delta_packet",
+  });
   const structuredContent = {
     contractVersion: CONTINUITY_MCP_CONTRACT_VERSION,
     routerVersion: AUTHORITY_ROUTER_VERSION,
     sourceKind: sourceMode === "public_github_excerpts" ? "public_github_excerpts" as const : "uploaded_text" as const,
-    sourceContext: repositoryReceipt
-      ? {
-          kind: sourceMode,
-          repository: repositoryReceipt.repository,
-          pinnedCommit: repositoryReceipt.pinnedCommit,
-          scope: repositoryReceipt.scope,
-        }
-      : { kind: sourceMode, repository: null, pinnedCommit: null, scope: null },
+    sourceContext: sourceBinding,
     question,
     route: {
       path: route.path,
@@ -836,6 +885,8 @@ function compileMaterialTool(input: JsonObject) {
     entityPackage,
     identityLinks,
     domainProfile,
+    reviewedKnowledge,
+    knowledgeSnapshot,
     relations: packet.relations,
     conflicts: packet.conflicts.map((conflict) => ({
       id: conflict.id,
@@ -855,7 +906,7 @@ function compileMaterialTool(input: JsonObject) {
   return {
     content: [{
       type: "text",
-      text: `Prepared ${structuredContent.claims.length} verified claim(s), ${structuredContent.entities.length} entity candidate(s), and ${structuredContent.relations.length} exact-span relation(s). Entity package ${entityPackage.version} contains ${entityPackage.mentions.length} evidence-bearing mention(s), ${entityPackage.ambiguitySets.length} ambiguity set(s), and ${entityPackage.qa.warnings} QA warning(s). Identity review found ${identityLinks.candidateLinks.length} suggest-only link candidate(s); domain profile ${domainProfile.version} proposed ${domainProfile.candidateParameters.length} inactive parameter(s). Project-corpus coverage remains open.`,
+      text: `Prepared ${structuredContent.claims.length} verified claim(s), ${structuredContent.entities.length} entity candidate(s), and ${structuredContent.relations.length} exact-span relation(s). Identity review found ${identityLinks.candidateLinks.length} suggest-only candidate(s). Reviewed knowledge is ${reviewedKnowledge.status}; ${reviewedKnowledge.identityLedger.acceptedDecisions.length} identity decision(s) were accepted and the domain profile is ${reviewedKnowledge.domainConfiguration.activated ? "active for this caller-attested review" : "inactive"}. Snapshot ${knowledgeSnapshot.snapshotFingerprint} preserves the submitted packet boundary; project-corpus coverage remains open.`,
     }],
     structuredContent,
     isError: false,

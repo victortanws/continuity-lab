@@ -80,7 +80,7 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
     assert.deepEqual(tool.securitySchemes, [{ type: "noauth" }]);
     assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
     assert.equal(tool._meta["continuity/contractVersion"], "continuity.mcp.v1");
-    assert.equal(tool._meta["continuity/routerVersion"], "3.7.0");
+    assert.equal(tool._meta["continuity/routerVersion"], "3.8.0");
     if (tool.inputSchema.properties.projectId) {
       assert.equal(tool.inputSchema.properties.projectId.maxLength, 128);
     }
@@ -92,9 +92,13 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
   assert.equal(compileTool._meta["continuity/entityPackageVersion"], "continuity.entity-package.v1");
   assert.equal(compileTool._meta["continuity/identityLinkPackageVersion"], "continuity.identity-links.v1");
   assert.equal(compileTool._meta["continuity/domainProfileVersion"], "continuity.domain-profile.v1");
+  assert.equal(compileTool._meta["continuity/reviewedKnowledgeVersion"], "continuity.reviewed-knowledge.v1");
+  assert.equal(compileTool._meta["continuity/knowledgeSnapshotVersion"], "continuity.knowledge-snapshot.v1");
   assert.equal(compileTool.outputSchema.properties.entityPackage.additionalProperties, false);
   assert.equal(compileTool.outputSchema.properties.identityLinks.additionalProperties, false);
   assert.equal(compileTool.outputSchema.properties.domainProfile.additionalProperties, false);
+  assert.equal(compileTool.outputSchema.properties.reviewedKnowledge.additionalProperties, false);
+  assert.equal(compileTool.outputSchema.properties.knowledgeSnapshot.additionalProperties, false);
   assert.equal(compileTool.outputSchema.properties.entityPackage.properties.mentions.items.additionalProperties, false);
   assert.deepEqual(
     compileTool.outputSchema.properties.entityPackage.properties.mentions.items.properties.coordinateSystem.enum,
@@ -103,6 +107,13 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
   assert.deepEqual(compileTool.inputSchema.properties.claims.items.properties.frameArity.enum, ["transitive", "intransitive"]);
   assert.deepEqual(compileTool.inputSchema.properties.entityMentions.items.properties.identityProfile.enum,
     ["natural_language", "case_sensitive_symbol", "opaque_identifier"]);
+  assert.ok(compileTool.inputSchema.properties.knowledgeReview);
+  assert.ok(compileTool.inputSchema.properties.previousSnapshot);
+  assert.equal(compileTool.inputSchema.properties.knowledgeReview.properties.identityDecisions.maxItems, 128);
+  assert.equal(compileTool.inputSchema.properties.knowledgeReview.properties.parameterDecisions.maxItems, 128);
+  assert.equal(compileTool.inputSchema.properties.knowledgeReview.properties.validatorDecisions.maxItems, 32);
+  assert.equal(compileTool.inputSchema.properties.previousSnapshot.properties.documents.maxItems, 256);
+  assert.deepEqual(compileTool.inputSchema.properties.snapshotMode.enum, ["delta_packet", "complete_packet"]);
   assert.match(compileTool.description, /empty object requires frameArity intransitive/i);
   assert.match(compileTool.description, /relation requires an exact cue and two accepted endpoint spans/i);
   assert.match(initialized.body.result.instructions, /copy subject, predicate, and any non-empty object byte-for-byte/i);
@@ -110,6 +121,8 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
   assert.match(initialized.body.result.instructions, /prefer entityPackage and obey its ambiguity sets and QA action-safety flags/i);
   assert.match(initialized.body.result.instructions, /identityLinks are suggest-only/i);
   assert.match(initialized.body.result.instructions, /domainProfile is an inactive schema-on-read proposal/i);
+  assert.match(initialized.body.result.instructions, /caller-attested rather than authenticated project canon/i);
+  assert.match(initialized.body.result.instructions, /GitHub excerpts are always a delta/i);
   assert.match(initialized.body.result.instructions, /never treat ambient ChatGPT attachments, Codex working-directory files/i);
   assert.match(initialized.body.result.instructions, /scopeReceipt/i);
   assert.match(repositoryTool.description, /multiple project scopes/i);
@@ -174,7 +187,7 @@ test("uploaded text is exact-span verified through the keyless MCP context tool"
 
   assert.equal(compiled.body.result.isError, false);
   assert.equal(compiled.body.result.structuredContent.contractVersion, "continuity.mcp.v1");
-  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.7.0");
+  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.8.0");
   assert.equal(compiled.body.result.structuredContent.coverage.completeForProjectCorpus, false);
   assert.equal(compiled.body.result.structuredContent.claims.length, 2);
   assert.equal(compiled.body.result.structuredContent.entities.every((entity) => entity.resolution === "ambiguous"), true);
@@ -188,9 +201,74 @@ test("uploaded text is exact-span verified through the keyless MCP context tool"
   assert.equal(compiled.body.result.structuredContent.identityLinks.qa.safeForAutomaticMerge, false);
   assert.equal(compiled.body.result.structuredContent.domainProfile.version, "continuity.domain-profile.v1");
   assert.equal(compiled.body.result.structuredContent.domainProfile.activated, false);
+  assert.equal(compiled.body.result.structuredContent.reviewedKnowledge.version, "continuity.reviewed-knowledge.v1");
+  assert.equal(compiled.body.result.structuredContent.reviewedKnowledge.status, "not_submitted");
+  assert.equal(compiled.body.result.structuredContent.knowledgeSnapshot.version, "continuity.knowledge-snapshot.v1");
+  assert.equal(compiled.body.result.structuredContent.knowledgeSnapshot.coverage.completeForProjectCorpus, false);
   assert.equal(compiled.body.result.structuredContent.conflicts.length, 1);
   assert.equal(compiled.body.result.structuredContent.route.graphUsed, true);
   assert.ok(compiled.body.result.structuredContent.route.validators.length <= 4);
+});
+
+test("the compile tool supports a fingerprint-bound review and snapshot round trip", async () => {
+  const argumentsValue = {
+    question: "Are Asteria and Asterai the same person, and should payments conserve cash?",
+    documents: [{ name: "chapter.md", text: "Asteria pays $50. Later, Asterai speaks." }],
+    claims: [{
+      documentName: "chapter.md", quote: "Asteria pays $50.", claimKind: "observed",
+      subject: "Asteria", predicate: "pays", object: "$50", polarity: "positive",
+    }],
+    entityMentions: [
+      { documentName: "chapter.md", quote: "Asteria pays $50.", mention: "Asteria", entityType: "character" },
+      { documentName: "chapter.md", quote: "Later, Asterai speaks.", mention: "Asterai", entityType: "character" },
+    ],
+  };
+  const first = await call(toolCall("review-first", "continuity_compile_material", argumentsValue));
+  const proposal = first.body.result.structuredContent;
+  const link = proposal.identityLinks.candidateLinks[0];
+  const canonical = proposal.entityPackage.entities.find((entity) => entity.aliases.includes("Asteria"));
+  const parameter = proposal.domainProfile.candidateParameters.find((candidate) => candidate.kind === "resource");
+  const validator = proposal.domainProfile.validatorCandidates.find((candidate) => candidate.validator === "resource_conservation");
+  assert.ok(link && canonical && parameter && validator);
+
+  const previousSnapshot = {
+    version: proposal.knowledgeSnapshot.version,
+    snapshotFingerprint: proposal.knowledgeSnapshot.snapshotFingerprint,
+    sourceBinding: proposal.knowledgeSnapshot.sourceBinding,
+    documents: proposal.knowledgeSnapshot.documents,
+    componentFingerprints: proposal.knowledgeSnapshot.componentFingerprints,
+  };
+  const second = await call(toolCall("review-second", "continuity_compile_material", {
+    ...argumentsValue,
+    knowledgeReview: {
+      reviewId: "director-pass-1",
+      projectScope: "example-story",
+      revision: "rev-1",
+      reviewerRole: "director",
+      identityPackageFingerprint: proposal.identityLinks.packageFingerprint,
+      domainProfileFingerprint: proposal.domainProfile.profileFingerprint,
+      identityDecisions: [{
+        candidateLinkId: link.id, outcome: "accept_misspelling", basis: "human_review",
+        canonicalEntityId: canonical.id, rationale: "The director confirms this spelling error.",
+      }],
+      parameterDecisions: [{ parameterId: parameter.id, decision: "approve", rationale: "Cash is a conserved resource." }],
+      validatorDecisions: [{ validatorId: validator.id, decision: "approve", rationale: "Payments must balance." }],
+      activateDomainProfile: true,
+    },
+    previousSnapshot,
+    snapshotMode: "complete_packet",
+  }));
+  const reviewed = second.body.result.structuredContent;
+  assert.equal(second.body.result.isError, false);
+  assert.equal(reviewed.reviewedKnowledge.status, "accepted");
+  assert.equal(reviewed.reviewedKnowledge.identityLedger.acceptedDecisions.length, 1);
+  assert.equal(reviewed.reviewedKnowledge.identityLedger.canonicalGroups.length, 1);
+  assert.equal(reviewed.reviewedKnowledge.domainConfiguration.activated, true);
+  assert.equal(reviewed.reviewedKnowledge.review.authenticated, false);
+  assert.equal(reviewed.reviewedKnowledge.review.projectCanon, false);
+  assert.equal(reviewed.entityPackage.entities.length, 2, "reviewed projection must not rewrite source entities");
+  assert.equal(reviewed.knowledgeSnapshot.comparison.status, "validated_previous_snapshot");
+  assert.deepEqual(reviewed.knowledgeSnapshot.comparison.unchangedDocuments, ["chapter.md"]);
 });
 
 test("unrelated software-release material admits exact transitive and intransitive claims without invented IDs", async () => {

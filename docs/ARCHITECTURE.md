@@ -499,6 +499,30 @@ but truth and executable validation change only after approval. It prevents a
 new dataset from silently rewriting the ontology on every question while
 avoiding a story-specific universal schema.
 
+Router v3.8 supplies the review boundary that v3.7 intentionally left open.
+The compiler remains one read-only tool with backward-compatible required
+inputs. A first call returns deterministic identity-link and domain-profile
+fingerprints. A second call may carry `knowledgeReview`, whose decisions must
+bind to those exact fingerprints and candidate IDs. Accepted decisions form a
+separate reviewed projection; they never modify the evidence-bearing entity
+package or original source spelling. Explicit-ID collisions fail closed, and
+case-sensitive or opaque symbols require a parser-binding basis.
+
+The keyless transport cannot authenticate a director or maintainer. Its review
+receipt therefore records caller-attested authority, `projectCanon: false`, and
+automatic-application safety as false even when the envelope is internally
+valid. An authenticated repository or workspace adapter may later elevate a
+persisted receipt according to project policy.
+
+`continuity.knowledge-snapshot.v1` binds source scope, immutable document
+fingerprints, and the entity, identity-link, domain-profile, and reviewed-
+knowledge components. A previous receipt enables deterministic new, changed,
+and unchanged comparison. Removed-document semantics are available only for a
+caller-declared complete direct-upload packet. Question-scoped GitHub excerpts
+are always deltas and cannot establish repository deletion or whole-corpus
+absence. This gives long-running agents a portable checkpoint without
+pretending that the public MCP secretly retains project state.
+
 ## External-validity gate
 
 The benchmark must run the same tasks against Vibe Coder Simulator, Slap the Heavens, and an unrelated long-form text. It measures citation precision and completeness, ambiguity and contradiction recall, identity resolution, reachability accuracy conditional on coverage, canon/proposal leakage, cross-project isolation, snapshot reproducibility, and correct abstention. The comparison baseline is a naive single prompt with the same files.

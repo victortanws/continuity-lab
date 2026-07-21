@@ -90,7 +90,7 @@ function directRelevance(question: string, values: string[]): boolean {
 
 function claimParameterKind(claim: McpContextClaim): DomainParameterKind {
   const material = `${claim.subject} ${claim.predicate} ${claim.object}`.toLocaleLowerCase("en-US");
-  if (/\b(?:cash|money|cost|price|pay|payment|balance|budget|credit|debit|transfer|fund|resource|energy|inventory)\b/.test(material)) return "resource";
+  if (/\b(?:cash|money|cost|price|pay(?:s|ed|ing)?|payment|balance|budget|credit|debit|transfer(?:s|red|ring)?|fund(?:s|ed|ing)?|resource|energy|inventory)\b/.test(material)) return "resource";
   if (/\b(?:allow|allowed|authorize|authorized|permission|permit|may|can|eligible|access|forbid|prohibit)\b/.test(material)) return "permission";
   if (/\b(?:know|knows|knew|learn|learns|discover|discovers|reveal|reveals|remember|forget|aware|believe)\b/.test(material)) return "knowledge";
   if (/\b(?:mother|father|grandmother|grandfather|sibling|friend|ally|enemy|rival|member|owns|belongs|related|relationship)\b/.test(material)) return "relationship";

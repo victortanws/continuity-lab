@@ -71,6 +71,27 @@ can apply itself. A second inactive domain-profile receipt proposes only the
 parameters evidenced in the submitted packet. This keeps entity resolution,
 schema discovery, and project approval as separate decisions.
 
+## Follow-up in v3.8
+
+Version 3.8 turns deterministic proposals into a fingerprint-bound review
+receipt. It records accepted aliases, misspellings, distinct entities, approved
+parameters, and approved validators while retaining the original occurrence
+table unchanged. Different explicit IDs cannot be merged through lexical
+review, code symbols require a parser-binding basis, and stale or fabricated
+references are rejected.
+
+The implementation pass also caught a genuine generalization defect in the
+v3.7 parameter heuristic: `pay` matched the resource vocabulary while the
+ordinary inflection `pays` did not. The fix covers common verb inflections at
+the shared classifier and is tested through both VCS-shaped and unrelated
+material. It was not patched as a one-sentence exception.
+
+The new snapshot receipt improves machine handoff and incremental comparison,
+but it does not change the evaluation standard. A future benchmark should
+score reviewed resolution separately from raw proposal quality and should
+penalize stale-review acceptance, explicit-ID merges, unauthenticated canon
+promotion, and false deletion claims.
+
 ## Next sealed evaluation
 
 Freeze the resolver, source packets, rubric, and run order before comparing the

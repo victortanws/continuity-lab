@@ -25,6 +25,10 @@ test("README and MVP explain the public MCP entry point and compatibility bounda
   assert.match(readme, /public transport negotiates current and supported legacy MCP protocol/i);
   assert.match(readme, /`continuity\.mcp\.v1`/);
   assert.match(readme, /`continuity\.entity-package\.v1`/);
+  assert.match(readme, /`reviewedKnowledge`/);
+  assert.match(readme, /`knowledgeSnapshot`/);
+  assert.match(readme, /caller-attested/i);
+  assert.match(readme, /Repository excerpts always remain a delta/i);
   assert.match(readme, /cannot.*automatically inherit.*attachment.*Git checkout/is);
 
   assert.match(page, /Settings → Security and login/);
