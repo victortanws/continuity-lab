@@ -97,6 +97,38 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
   assert.deepEqual(ping.body.result, {});
 });
 
+test("MCP initialization negotiates current and legacy client protocol versions", async () => {
+  for (const protocolVersion of ["2025-11-25", "2025-06-18", "2025-03-26"]) {
+    const initialized = await POST(request({
+      jsonrpc: "2.0",
+      id: `init-${protocolVersion}`,
+      method: "initialize",
+      params: { protocolVersion, capabilities: {}, clientInfo: { name: "compatibility-test", version: "1" } },
+    }, { "MCP-Protocol-Version": protocolVersion }));
+    const body = await initialized.json();
+    assert.equal(initialized.status, 200);
+    assert.equal(body.result.protocolVersion, protocolVersion);
+
+    const listed = await POST(request({
+      jsonrpc: "2.0",
+      id: `list-${protocolVersion}`,
+      method: "tools/list",
+      params: {},
+    }, { "MCP-Protocol-Version": protocolVersion }));
+    assert.equal(listed.status, 200);
+    assert.equal((await listed.json()).result.tools.length, 5);
+  }
+
+  const futureClient = await POST(request({
+    jsonrpc: "2.0",
+    id: "future-client",
+    method: "initialize",
+    params: { protocolVersion: "2099-01-01", capabilities: {}, clientInfo: { name: "future-test", version: "1" } },
+  }, { "MCP-Protocol-Version": "" }));
+  assert.equal(futureClient.status, 200);
+  assert.equal((await futureClient.json()).result.protocolVersion, "2025-11-25");
+});
+
 test("uploaded text is exact-span verified through the keyless MCP context tool", async () => {
   const compiled = await call(toolCall("compile", "continuity_compile_material", {
     question: "Who is Grandma, and does the gate open?",
@@ -401,21 +433,21 @@ test("MCP validates initialization and the negotiated protocol header", async ()
   assert.equal(missingClientInfo.body.error.code, -32602);
   assert.match(missingClientInfo.body.error.message, /clientInfo/);
 
-  const unsupportedInitialize = await call({
+  const legacyInitialize = await call({
     jsonrpc: "2.0",
     id: "init-old",
     method: "initialize",
     params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } },
   });
-  assert.equal(unsupportedInitialize.response.status, 400);
-  assert.match(unsupportedInitialize.body.error.message, /unsupported initialize protocolVersion/i);
+  assert.equal(legacyInitialize.response.status, 200);
+  assert.equal(legacyInitialize.body.result.protocolVersion, "2024-11-05");
 
   const mismatchedInitializeHeader = await POST(request({
     jsonrpc: "2.0",
     id: "init-header-old",
     method: "initialize",
     params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } },
-  }, { "MCP-Protocol-Version": "2024-11-05" }));
+  }, { "MCP-Protocol-Version": "2023-01-01" }));
   assert.equal(mismatchedInitializeHeader.status, 400);
   assert.match((await mismatchedInitializeHeader.json()).error.message, /unsupported MCP-Protocol-Version/i);
 
@@ -429,7 +461,7 @@ test("MCP validates initialization and the negotiated protocol header", async ()
 
   const unsupportedHeaderResponse = await POST(request(
     { jsonrpc: "2.0", id: "old-header", method: "tools/list", params: {} },
-    { "MCP-Protocol-Version": "2024-11-05" },
+    { "MCP-Protocol-Version": "2023-01-01" },
   ));
   assert.equal(unsupportedHeaderResponse.status, 400);
   assert.match((await unsupportedHeaderResponse.json()).error.message, /unsupported MCP-Protocol-Version/i);

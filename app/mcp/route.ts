@@ -36,7 +36,18 @@ import { ContinuityRepository } from "@/lib/continuity/storage/repository";
 
 export const runtime = "edge";
 
-const MCP_PROTOCOL_VERSION = "2025-06-18";
+// Keep the transport compatible with current and older MCP clients. The
+// protocol requires version negotiation during initialize; pinning this route
+// to one client version makes discovery fail as soon as ChatGPT or Inspector
+// advances to a newer supported release.
+const LATEST_MCP_PROTOCOL_VERSION = "2025-11-25";
+const SUPPORTED_MCP_PROTOCOL_VERSIONS = Object.freeze([
+  LATEST_MCP_PROTOCOL_VERSION,
+  "2025-06-18",
+  "2025-03-26",
+  "2024-11-05",
+  "2024-10-07",
+]);
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_TEXT_LENGTH = 8_000;
 const MAX_CONTEXT_REFS = 20;
@@ -385,13 +396,14 @@ export async function POST(request: Request): Promise<Response> {
   if (payload.method === "initialize") {
     if (!hasId) return rpcError(null, -32600, "initialize must be a JSON-RPC request with an id.", 400);
     const suppliedHeader = request.headers.get("MCP-Protocol-Version")?.trim();
-    if (suppliedHeader && suppliedHeader !== MCP_PROTOCOL_VERSION) {
-      return rpcError(id, -32600, `Unsupported MCP-Protocol-Version ${suppliedHeader}; this transport supports ${MCP_PROTOCOL_VERSION}.`, 400);
+    if (suppliedHeader && !isSupportedProtocolVersion(suppliedHeader)) {
+      return rpcError(id, -32600, unsupportedProtocolMessage(suppliedHeader), 400);
     }
     const initializeError = validateInitializeParams(payload.params);
     if (initializeError) return rpcError(id, -32602, initializeError, 400);
+    const protocolVersion = negotiateProtocolVersion(payload.params);
     return rpcResult(id, {
-      protocolVersion: MCP_PROTOCOL_VERSION,
+      protocolVersion,
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "continuity-lab-reviewed-sample", version: "0.2.0" },
       instructions: "Read-only, stateless continuity tools. Reviewed VCS tools never synchronize a repository or invoke a paid model provider. For uploaded or pasted material, read only question-relevant text, propose exact quotes and entity mentions to continuity_compile_material, then answer from the verified receipt; rejected or absent claims remain unknown. In each claim, copy subject, predicate, and any non-empty object byte-for-byte from the quote in that order. Use frameArity intransitive with object \"\" only for a single copied predicate token that finishes the quoted clause; never discard an expressed object. Mark polarity negative only when the quote directly negates the claim. Omit explicitId unless that exact ID occurs in the entity quote. claimKind classifies a source assertion and never grants authority. For causal structure, optionally propose relations by original claim index: the supporting positive causal, normative, or historical claim must contain the exact cue and both accepted endpoint spans. Direction is prerequisite to dependent, trigger to effect, or earlier to later. Do not materialize negative, or/unless, or alternative-path logic as a simple edge; admitted edges aid navigation and are not reachability proofs. For a public GitHub URL, call continuity_inspect_public_repository first, then pass returned excerpts to continuity_compile_material when exact entity, conflict, or causal structure is needed. Neither path promotes source assertions to project canon. Change analyses are proposals and never become canon.",
@@ -1079,16 +1091,14 @@ function validEmptyParams(value: unknown): boolean {
 
 function validateProtocolHeader(request: Request): string | null {
   const version = request.headers.get("MCP-Protocol-Version")?.trim() ?? "";
-  if (!version) return `MCP-Protocol-Version is required after initialize and must equal ${MCP_PROTOCOL_VERSION}.`;
-  return version === MCP_PROTOCOL_VERSION
-    ? null
-    : `Unsupported MCP-Protocol-Version ${version}; this transport supports ${MCP_PROTOCOL_VERSION}.`;
+  if (!version) return "MCP-Protocol-Version is required after initialize.";
+  return isSupportedProtocolVersion(version) ? null : unsupportedProtocolMessage(version);
 }
 
 function validateInitializeParams(value: unknown): string | null {
   if (!isRecord(value)) return "initialize params must be an object.";
-  if (value.protocolVersion !== MCP_PROTOCOL_VERSION) {
-    return `Unsupported initialize protocolVersion; this transport supports ${MCP_PROTOCOL_VERSION}.`;
+  if (typeof value.protocolVersion !== "string" || !value.protocolVersion.trim() || value.protocolVersion.length > 64) {
+    return "initialize protocolVersion must be a non-empty string no longer than 64 characters.";
   }
   if (!isRecord(value.capabilities)) return "initialize capabilities must be an object.";
   if (!isRecord(value.clientInfo)
@@ -1101,6 +1111,23 @@ function validateInitializeParams(value: unknown): string | null {
     return "initialize clientInfo requires non-empty name and version strings no longer than 128 characters.";
   }
   return null;
+}
+
+function negotiateProtocolVersion(value: unknown): string {
+  if (!isRecord(value) || typeof value.protocolVersion !== "string") {
+    return LATEST_MCP_PROTOCOL_VERSION;
+  }
+  return isSupportedProtocolVersion(value.protocolVersion)
+    ? value.protocolVersion
+    : LATEST_MCP_PROTOCOL_VERSION;
+}
+
+function isSupportedProtocolVersion(version: string): boolean {
+  return SUPPORTED_MCP_PROTOCOL_VERSIONS.includes(version as typeof SUPPORTED_MCP_PROTOCOL_VERSIONS[number]);
+}
+
+function unsupportedProtocolMessage(version: string): string {
+  return `Unsupported MCP-Protocol-Version ${version}; supported versions are ${SUPPORTED_MCP_PROTOCOL_VERSIONS.join(", ")}.`;
 }
 
 function optionalTrimmedString(value: unknown, maxLength: number): string | null {
