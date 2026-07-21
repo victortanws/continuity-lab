@@ -479,6 +479,26 @@ subtypes, and returns deterministic QA and action-safety flags. Unresolved names
 are represented as distinct candidates; only exact source-scoped identifiers
 may consolidate repeated mentions without further identity evidence.
 
+Router v3.7 keeps that package and every existing tool name intact. It adds two
+parallel proposal receipts to the exact-span compiler response:
+
+- `continuity.identity-links.v1` compares accepted entity records for spelling,
+  case, formatting, token, and surface-collision signals. It preserves the
+  exact source forms, distinguishes code symbols and opaque identifiers from
+  ordinary names, exposes uncalibrated similarity as review evidence, and
+  never changes entity identity.
+- `continuity.domain-profile.v1` treats observed subtypes, predicates, temporal
+  axes, and admitted relations as candidate project parameters. It maps them
+  onto a small domain-neutral kernel—identity, state, resources, permissions,
+  knowledge, events, time, and relationships—but leaves the profile inactive.
+  A trusted, versioned adapter must approve any parameter or validator before
+  it can govern reachability or production decisions.
+
+This is a deliberate two-stage boundary: schema may be proposed while reading,
+but truth and executable validation change only after approval. It prevents a
+new dataset from silently rewriting the ontology on every question while
+avoiding a story-specific universal schema.
+
 ## External-validity gate
 
 The benchmark must run the same tasks against Vibe Coder Simulator, Slap the Heavens, and an unrelated long-form text. It measures citation precision and completeness, ambiguity and contradiction recall, identity resolution, reachability accuracy conditional on coverage, canon/proposal leakage, cross-project isolation, snapshot reproducibility, and correct abstention. The comparison baseline is a naive single prompt with the same files.

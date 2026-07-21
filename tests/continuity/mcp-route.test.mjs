@@ -80,7 +80,7 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
     assert.deepEqual(tool.securitySchemes, [{ type: "noauth" }]);
     assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
     assert.equal(tool._meta["continuity/contractVersion"], "continuity.mcp.v1");
-    assert.equal(tool._meta["continuity/routerVersion"], "3.6.0");
+    assert.equal(tool._meta["continuity/routerVersion"], "3.7.0");
     if (tool.inputSchema.properties.projectId) {
       assert.equal(tool.inputSchema.properties.projectId.maxLength, 128);
     }
@@ -90,18 +90,26 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
   const reviewedAnswerTool = listed.body.result.tools.find((tool) => tool.name === "continuity_answer_question");
   assert.equal(compileTool.inputSchema.properties.claims.items.properties.object.minLength, 0);
   assert.equal(compileTool._meta["continuity/entityPackageVersion"], "continuity.entity-package.v1");
+  assert.equal(compileTool._meta["continuity/identityLinkPackageVersion"], "continuity.identity-links.v1");
+  assert.equal(compileTool._meta["continuity/domainProfileVersion"], "continuity.domain-profile.v1");
   assert.equal(compileTool.outputSchema.properties.entityPackage.additionalProperties, false);
+  assert.equal(compileTool.outputSchema.properties.identityLinks.additionalProperties, false);
+  assert.equal(compileTool.outputSchema.properties.domainProfile.additionalProperties, false);
   assert.equal(compileTool.outputSchema.properties.entityPackage.properties.mentions.items.additionalProperties, false);
   assert.deepEqual(
     compileTool.outputSchema.properties.entityPackage.properties.mentions.items.properties.coordinateSystem.enum,
     ["utf16_code_units"],
   );
   assert.deepEqual(compileTool.inputSchema.properties.claims.items.properties.frameArity.enum, ["transitive", "intransitive"]);
+  assert.deepEqual(compileTool.inputSchema.properties.entityMentions.items.properties.identityProfile.enum,
+    ["natural_language", "case_sensitive_symbol", "opaque_identifier"]);
   assert.match(compileTool.description, /empty object requires frameArity intransitive/i);
   assert.match(compileTool.description, /relation requires an exact cue and two accepted endpoint spans/i);
   assert.match(initialized.body.result.instructions, /copy subject, predicate, and any non-empty object byte-for-byte/i);
   assert.match(initialized.body.result.instructions, /omit explicitId unless that exact ID occurs/i);
   assert.match(initialized.body.result.instructions, /prefer entityPackage and obey its ambiguity sets and QA action-safety flags/i);
+  assert.match(initialized.body.result.instructions, /identityLinks are suggest-only/i);
+  assert.match(initialized.body.result.instructions, /domainProfile is an inactive schema-on-read proposal/i);
   assert.match(initialized.body.result.instructions, /never treat ambient ChatGPT attachments, Codex working-directory files/i);
   assert.match(initialized.body.result.instructions, /scopeReceipt/i);
   assert.match(repositoryTool.description, /multiple project scopes/i);
@@ -166,7 +174,7 @@ test("uploaded text is exact-span verified through the keyless MCP context tool"
 
   assert.equal(compiled.body.result.isError, false);
   assert.equal(compiled.body.result.structuredContent.contractVersion, "continuity.mcp.v1");
-  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.6.0");
+  assert.equal(compiled.body.result.structuredContent.routerVersion, "3.7.0");
   assert.equal(compiled.body.result.structuredContent.coverage.completeForProjectCorpus, false);
   assert.equal(compiled.body.result.structuredContent.claims.length, 2);
   assert.equal(compiled.body.result.structuredContent.entities.every((entity) => entity.resolution === "ambiguous"), true);
@@ -176,6 +184,10 @@ test("uploaded text is exact-span verified through the keyless MCP context tool"
   assert.equal(compiled.body.result.structuredContent.entityPackage.ambiguitySets.length, 1);
   assert.equal(compiled.body.result.structuredContent.entityPackage.qa.safeForAutomaticIdentityMerge, false);
   assert.equal(compiled.body.result.structuredContent.entityPackage.qa.safeForProjectCanonPromotion, false);
+  assert.equal(compiled.body.result.structuredContent.identityLinks.version, "continuity.identity-links.v1");
+  assert.equal(compiled.body.result.structuredContent.identityLinks.qa.safeForAutomaticMerge, false);
+  assert.equal(compiled.body.result.structuredContent.domainProfile.version, "continuity.domain-profile.v1");
+  assert.equal(compiled.body.result.structuredContent.domainProfile.activated, false);
   assert.equal(compiled.body.result.structuredContent.conflicts.length, 1);
   assert.equal(compiled.body.result.structuredContent.route.graphUsed, true);
   assert.ok(compiled.body.result.structuredContent.route.validators.length <= 4);

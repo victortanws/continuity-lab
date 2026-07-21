@@ -61,6 +61,16 @@ exact IDs, and apparent IDs owned by different sources remain separate.
 - It does not make an incomplete extraction complete.
 - It does not replace a human-readable answer with raw JSON.
 
+## Follow-up in v3.7
+
+Version 3.7 addresses the next identity boundary without weakening v3.6.
+Possible aliases, spelling mistakes, code-case variants, and lexical near
+matches are emitted in a separate suggest-only identity-link package. Exact
+source forms remain immutable, scores are explicitly uncalibrated, and no link
+can apply itself. A second inactive domain-profile receipt proposes only the
+parameters evidenced in the submitted packet. This keeps entity resolution,
+schema discovery, and project approval as separate decisions.
+
 ## Next sealed evaluation
 
 Freeze the resolver, source packets, rubric, and run order before comparing the

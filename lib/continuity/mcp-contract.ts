@@ -103,7 +103,7 @@ export const continuityMcpTools = {
     },
   },
   continuity_compile_material: {
-    description: "Use after the user uploads or pastes material, or after continuity_inspect_public_repository returns bounded excerpts and a scope receipt. Verify ChatGPT-proposed exact surface spans, entity mentions, and optional evidence-bound relations; preserve ambiguity and source disagreement; and return a bounded question-scoped context receipt plus an evidence-bearing entity package for machine handoff. Repository-wide questions require sourceContext kind public_github_excerpts and the unchanged receipt; do not infer 'this repository' from ambient ChatGPT or Codex context. Claim subject, predicate, and non-empty object must be copied byte-for-byte from the quote in that order; an empty object requires frameArity intransitive and one terminal predicate token. A relation requires an exact cue and two accepted endpoint spans inside one accepted supporting claim. The tool is stateless, keyless, and never promotes supplied text to project canon.",
+    description: "Use after the user uploads or pastes material, or after continuity_inspect_public_repository returns bounded excerpts and a scope receipt. Verify ChatGPT-proposed exact surface spans, entity mentions, and optional evidence-bound relations; preserve ambiguity and source disagreement; and return a bounded question-scoped context receipt, an evidence-bearing entity package, suggest-only alias or typo candidates, and an inactive domain-profile proposal. Repository-wide questions require sourceContext kind public_github_excerpts and the unchanged receipt; do not infer 'this repository' from ambient ChatGPT or Codex context. Claim subject, predicate, and non-empty object must be copied byte-for-byte from the quote in that order; an empty object requires frameArity intransitive and one terminal predicate token. A relation requires an exact cue and two accepted endpoint spans inside one accepted supporting claim. Candidate identity links never merge entities, and proposed parameters never become governing schema without review. The tool is stateless, keyless, and never promotes supplied text to project canon.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -198,6 +198,10 @@ export const continuityMcpTools = {
               mention: { type: "string", minLength: 1, maxLength: 512 },
               mentionOccurrence: { type: "integer", minimum: 1 },
               entityType: { type: "string", minLength: 1, maxLength: 512 },
+              identityProfile: {
+                type: "string", enum: ["natural_language", "case_sensitive_symbol", "opaque_identifier"],
+                description: "Optional matching boundary. Use case_sensitive_symbol for code symbols and opaque_identifier for registry values. Omit for ordinary names. This affects candidate comparison but never authorizes an automatic merge.",
+              },
               explicitId: {
                 type: "string", minLength: 1, maxLength: 512,
                 description: "Optional. Supply only when this exact identifier occurs byte-for-byte inside the entity quote; otherwise omit it.",

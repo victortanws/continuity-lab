@@ -62,8 +62,8 @@ function answer(overrides = {}) {
 }
 
 test("router and answer contracts evolve independently across router upgrades", () => {
-  assert.equal(routerReceiptVersion(), "3.6.0");
-  assert.equal(AUTHORITY_ROUTER_VERSION, "3.6.0");
+  assert.equal(routerReceiptVersion(), "3.7.0");
+  assert.equal(AUTHORITY_ROUTER_VERSION, "3.7.0");
   assert.equal(CONTINUITY_ANSWER_VERSION, "continuity.answer.v7");
 });
 
@@ -79,7 +79,7 @@ test("a focused identity lookup gets only the obligations it needs", () => {
   const obligations = compileAnswerObligations(request, routed.route, routed.evidence);
 
   assert.equal(routed.route.presentationDepth, "focused");
-  assert.equal(routed.route.routerVersion, "3.6.0");
+  assert.equal(routed.route.routerVersion, "3.7.0");
   assert.equal(routed.route.truthTarget, "packet_assertion");
   assert.ok(obligations.some((item) => item.kind === "entity_resolution"));
   assert.equal(obligations.some((item) => item.kind === "reachability_certificate"), false);

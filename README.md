@@ -116,6 +116,14 @@ the current [OpenAI Apps SDK connection guide](https://developers.openai.com/app
 - **Entity resolution:** deciding whether two names refer to the same thing.
   Continuity Lab is allowed to say “possibly” or “ambiguous” instead of forcing
   a bad merge.
+- **Identity-link candidate:** a review suggestion that two names may be
+  connected—for example, an alias, capitalization variant, or possible typo.
+  A candidate does not merge entities or rewrite the source. Its score ranks
+  lexical similarity and is not a probability.
+- **Domain profile:** a proposed list of the entity types, traits,
+  relationships, state dimensions, and validators that appear useful for one
+  kind of material. A profile inferred from uploaded text stays inactive until
+  it is reviewed and versioned for that project.
 - **Dependency:** something that must happen before something else can happen,
   or something later that relies on the earlier result.
 - **Canon or established truth:** what the accepted project material currently
@@ -339,6 +347,14 @@ the product:
   excerpts only with `sourceContext.kind=public_github_excerpts` and the
   unchanged scope receipt returned by the repository inspector. A direct
   upload remains the lightweight default and needs no repository receipt.
+  The response also contains `identityLinks`, which reports possible aliases,
+  spelling variants, case variants, surface-name collisions, and cross-source
+  identifier reuse without applying a merge. Code symbols can be marked
+  `case_sensitive_symbol`, so `createCharacter` and `CreateCharacter` remain
+  distinct unless parser or reviewed rename evidence connects them.
+  `domainProfile` is a separate schema-on-read proposal. It derives
+  evidence-bearing candidate parameters and validators from the submitted
+  packet, but every item remains inactive and requires review.
 - `continuity_inspect_public_repository` is one current acquisition connector.
   It pins a public GitHub repository to one commit, discovers independent
   project roots and declared evidence domains, and then returns a small safe
@@ -420,11 +436,11 @@ flattened into misleading edges. This is not yet a durable whole-corpus
 knowledge graph, alternative-path solver, or automatic natural-language
 causality theorem prover.
 
-### Router v3.6 compatibility
+### Router v3.7 compatibility
 
 The public transport negotiates current and supported legacy MCP protocol
 versions, and its stable data contract remains `continuity.mcp.v1`.
-Authority-router version `3.6.0` is advertised separately
+Authority-router version `3.7.0` is advertised separately
 as namespaced tool metadata, so router changes do not rename tools or resource
 identities. The three v3.2 reviewed-sample tools keep their existing names,
 inputs, and output shape; v3.3 added the two context tools, v3.4 added a
@@ -435,7 +451,11 @@ retaining the compact `entities` array used by older consumers. The package
 separates canonical candidates from their exact source occurrences and includes
 the controlled ontology, ambiguity sets, provenance, and deterministic QA
 receipt needed for machine handoff. It never promotes an upload to project
-canon. The public
+canon. Version 3.7 adds separate `identityLinks` and `domainProfile` receipts.
+Both are additive and proposal-only: identity candidates cannot merge entities,
+and inferred parameters cannot become governing project schema. Ordinary names
+retain the v3.6 matching behavior; callers may opt exact code symbols or opaque
+registry values into stricter identity profiles. The public
 repository tool has an optional `projectScope` input and now returns the scope
 receipt that the compiler requires for repository-wide questions;
 the five tool names and v1 contract remain stable. Tests exercise
@@ -468,6 +488,26 @@ package with no structural failures remains unsafe for automatic identity
 merging when ambiguity, unresolved mentions, source disagreement, or rejected
 proposals remain. Every upload remains unsafe for automatic project-canon
 promotion because packet-relative assertions are not approval.
+
+### Alias, typo, and parameter proposals
+
+`identityLinks` uses `continuity.identity-links.v1`. It compares only accepted,
+exact-span entity occurrences and may report same-surface ambiguity, case or
+format variants, token reordering, possible typos, lexical near matches,
+surface collisions, or cross-source identifier reuse. Every candidate retains
+the evidence mentions on both sides, a deterministic heuristic ranking,
+reasons, contraindications, and `safeToApplyAutomatically: false`. The source
+spelling is never corrected silently. Established alias groups appear only
+when the same exact source-scoped identifier already bound their occurrences.
+
+`domainProfile` uses `continuity.domain-profile.v1`. It proposes candidate
+entity subtypes, exact source predicates, temporal axes, relationship types,
+and corresponding validators. It keeps the small universal continuity kernel
+fixed while allowing story, game, code, production, or operational material to
+suggest the dimensions that matter locally. The proposal covers only the
+submitted packet and question. It is never proof of an exhaustive corpus
+ontology and always returns `activated: false` and
+`safeForAutomaticActivation: false`.
 
 ### Runtime shape
 

@@ -72,6 +72,7 @@ const HARD_REPOSITORY_LIMITS = Object.freeze({
 
 export type PacketRelativeAuthority = "reference" | "proposal" | "production_record";
 export type ClaimPolarity = "positive" | "negative";
+export type IdentityMatchingProfile = "natural_language" | "case_sensitive_symbol" | "opaque_identifier";
 
 export type UploadedTextDocument = {
   name: string;
@@ -107,6 +108,12 @@ export type ProposedEntityMention = {
   /** One-based occurrence when the mention repeats inside the quote. */
   mentionOccurrence?: number;
   entityType?: string;
+  /**
+   * Matching is conservative by default. Code symbols and opaque registry IDs
+   * may opt into exact case-sensitive identity without changing how ordinary
+   * story names are handled by older clients.
+   */
+  identityProfile?: IdentityMatchingProfile;
   /** Must itself occur inside the exact quote; remains source scoped. */
   explicitId?: string;
 };
@@ -165,6 +172,7 @@ export type McpEntityCandidate = {
   assertionOwnerId: string;
   mention: string;
   entityType: string;
+  identityProfile: IdentityMatchingProfile;
   explicitId: string | null;
   referentKey: string;
   quote: string;
@@ -280,6 +288,22 @@ function sourceInstructionRisk(value: string): boolean {
 
 function normalized(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US");
+}
+
+function inferredIdentityProfile(
+  entityType: string | undefined,
+  requested: IdentityMatchingProfile | undefined,
+): IdentityMatchingProfile {
+  if (requested) return requested;
+  const type = normalized(entityType ?? "unknown").replace(/[^a-z0-9]+/g, "_");
+  return /(?:^|_)(?:function|method|class|interface|variable|constant|symbol|module|namespace|property|field|enum|type_alias)(?:_|$)/.test(type)
+    ? "case_sensitive_symbol"
+    : "natural_language";
+}
+
+function identityKey(value: string, profile: IdentityMatchingProfile): string {
+  const exact = value.normalize("NFKC").trim().replace(/\s+/g, " ");
+  return profile === "natural_language" ? exact.toLocaleLowerCase("en-US") : exact;
 }
 
 /** A deterministic, non-secret fingerprint used for stable local IDs. */
@@ -655,6 +679,11 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
       rejectedProposals.push({ proposalType: "entity", proposalIndex, code: "invalid_entity_type" });
       return;
     }
+    if (proposal.identityProfile !== undefined
+      && !["natural_language", "case_sensitive_symbol", "opaque_identifier"].includes(proposal.identityProfile)) {
+      rejectedProposals.push({ proposalType: "entity", proposalIndex, code: "invalid_identity_profile" });
+      return;
+    }
     if (proposal.explicitId !== undefined && (!validField(proposal.explicitId) || !containsExactIdentifier(proposal.quote, proposal.explicitId))) {
       rejectedProposals.push({ proposalType: "entity", proposalIndex, code: "unanchored_explicit_id" });
       return;
@@ -663,8 +692,9 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
     const end = quoteSpan.start + mentionSpan.end;
     const groupId = stableId("entgrp", normalized(proposal.mention));
     const explicitId = proposal.explicitId ?? null;
+    const identityProfile = inferredIdentityProfile(proposal.entityType, proposal.identityProfile);
     const referentKey = explicitId
-      ? `source:${source.id}:explicit:${normalized(explicitId)}`
+      ? `source:${source.id}:explicit:${identityProfile}:${identityKey(explicitId, identityProfile)}`
       : `mention:${normalized(proposal.mention)}`;
     const id = stableId("ent", `${source.id}\u0000${start}\u0000${end}\u0000${referentKey}`);
     acceptedEntities.set(id, {
@@ -674,6 +704,7 @@ export function buildMcpContextPacket(input: McpContextInput): McpContextPacket 
       assertionOwnerId: source.id,
       mention: proposal.mention,
       entityType: normalized(proposal.entityType ?? "unknown"),
+      identityProfile,
       explicitId,
       referentKey,
       quote: proposal.quote,
