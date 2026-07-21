@@ -16,26 +16,30 @@ slice. It also lacks the hospital-payment action and saved result that would
 unlock the later recovery scene. Continuity Lab separates those two problems
 and turns them into a concrete development plan.
 
-## Quick start guide
+## Quick Start Guide: Installation, Supported Platforms, and Testing Guidelines
+
+No installation is required for the hosted example. Open it in a modern web browser and begin with the supplied questions. When testing an answer, compare it with the cited evidence and note anything marked uncertain, missing, or proposed.
 
 ### Try the worked example
 
-1. Open the [worked example](https://continuity-lab-vcs.synthesys.chatgpt.site/). The Vibe Code Simulator example is already visible.
-2. Choose one of the example questions, such as:
+1. Open the [Continuity Lab worked example](https://continuity-lab-vcs.synthesys.chatgpt.site/). The Vibe Code Simulator example will already be visible.
+
+2. Choose an example question:
 
    - “Can the player earn and pay $47,000 in the current prototype?”
    - “Who does ‘Grandma’ mean in the Day 8 customer message?”
-   - “If Grandma's operation cost changed to $60,000, what else would need to change?”
+   - “If Grandma’s operation cost changed to $60,000, what else would need to change?”
 
-3. Read the direct answer first.
-4. Open the supporting sections to see:
+3. Read the direct answer.
 
-   - what must happen first;
-   - which step is missing;
-   - which people, events, rules, or items the question refers to;
-   - which passages support the answer; and
-   - what should be changed next.
+4. Review the supporting sections to see:
 
+   - What must happen first.
+   - Which step is missing.
+   - Which people, events, rules, or items the question refers to.
+   - Which passages support the answer.
+   - What should be changed next.
+     
 The light/dark control in the top navigation remembers your preference on that
 device.
 
