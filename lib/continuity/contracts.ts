@@ -553,6 +553,9 @@ export type QueryResult = {
   validation: {
     repaired: boolean;
     issues: string[];
+    /** Additive v3.8 receipt. Older clients may ignore it; it never weakens
+     * the typed verdict or promotes a proposal. */
+    claimClosure?: import("./claim-closure").ClaimClosureReceipt;
     obligationResults?: Array<{
       obligationId: string;
       status: "satisfied" | "repaired" | "unresolved" | "not_applicable";

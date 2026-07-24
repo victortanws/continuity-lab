@@ -81,7 +81,15 @@ test("the built worker exposes the Sites-compatible MCP alias", async () => {
   }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.result.tools.length, 5);
+  assert.equal(body.result.tools.length, 6);
+  assert.deepEqual(body.result.tools.slice(0, 5).map((tool) => tool.name), [
+    "continuity_answer_question",
+    "continuity_trace_dependencies",
+    "continuity_analyze_change",
+    "continuity_compile_material",
+    "continuity_inspect_public_repository",
+  ]);
+  assert.equal(body.result.tools[5].name, "continuity_validate_draft");
   assert.equal(body.result.tools[0]._meta["continuity/contractVersion"], "continuity.mcp.v1");
   assert.equal(body.result.tools[0].inputSchema.properties.projectId.default, "vcs-demo");
   assert.equal(body.result.tools[0].inputSchema.properties.projectRevision.default, "vcs-demo-r2");

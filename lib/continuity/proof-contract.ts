@@ -10,6 +10,7 @@ import {
   normalizedQuestionText,
   type ContinuityQuestionIntent,
 } from "./question-intent";
+import { profileClaimSurface } from "./claim-closure";
 
 export type ProofRouteClass = "lookup" | "scoped" | "causal" | "change";
 export type ProofKind =
@@ -39,12 +40,29 @@ export type ProofContract = {
   dependenciesRequired: boolean;
   transitionCertificateRequired: boolean;
   citationBudget: { minimum: number; maximum: number };
+  /** Deterministic surface inventory. This widens evidence collection for a
+   * multi-claim audit but never establishes any claim by itself. */
+  claimInventory: {
+    materialStatements: number;
+    numericClaims: number;
+    suppliedCitations: number;
+    identifiers: number;
+    requiresBroadRetrieval: boolean;
+  };
   rationale: string;
 };
 
 export function compileProofContract(request: QueryRequest): ProofContract {
   const intent = inferContinuityQuestionIntent(request.question);
-  const normalized = normalizedQuestionText(`${request.question} ${request.proposedChange ?? ""}`);
+  const claimSurface = `${request.question}\n${request.proposedChange ?? ""}`.trim();
+  const inventory = profileClaimSurface(claimSurface);
+  const decisionNumbers = inventory.numbers.filter((claim) => {
+    if (claim.kind === "currency" || claim.kind === "percent") return true;
+    const statement = inventory.statements.find((candidate) => candidate.id === claim.statementId)?.text ?? "";
+    const escaped = claim.surface.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return !new RegExp(`\\b(?:day|chapter|episode|scene|page|line|version|build|release)\\s*${escaped}\\b`, "i").test(statement);
+  });
+  const normalized = normalizedQuestionText(claimSurface);
   const routeClass = routeClassFor(intent, Boolean(request.proposedChange?.trim()));
   const minimumMode: AnalysisMode = routeClass === "change"
     ? "evaluate_change"
@@ -52,6 +70,9 @@ export function compileProofContract(request: QueryRequest): ProofContract {
   const mode = deeperMode(request.analysisMode ?? "answer_question", minimumMode);
   const claimKinds = [...new Set([
     ...claimKindsFor(intent, normalized, routeClass),
+    ...(decisionNumbers.length ? ["configured" as const] : []),
+    ...(inventory.identifiers.length ? ["implemented" as const] : []),
+    ...(inventory.citations.length ? ["historical" as const] : []),
     ...(request.claimKinds ?? []),
   ])];
   const exhaustive = asksForExhaustiveOrNegativeProof(normalized);
@@ -61,11 +82,15 @@ export function compileProofContract(request: QueryRequest): ProofContract {
   const proofKind = proofKindFor(intent, routeClass);
   const retrievalLanes = [...new Set([
     ...lanesFor(intent, normalized, routeClass),
+    ...(decisionNumbers.length ? ["declared_state" as const] : []),
+    ...(inventory.identifiers.length ? ["execution" as const] : []),
+    ...(inventory.citations.length ? ["authority" as const, "change_history" as const] : []),
     ...claimKinds.flatMap(lanesForClaimKind),
   ])];
   const dependenciesRequired = routeClass === "causal" || routeClass === "change";
   const transitionCertificateRequired = intent === "reachability" || intent === "repair_plan";
-  const maximum = routeClass === "lookup" ? 3 : routeClass === "scoped" ? 6 : routeClass === "causal" ? 12 : 16;
+  const baseMaximum = routeClass === "lookup" ? 3 : routeClass === "scoped" ? 6 : routeClass === "causal" ? 12 : 16;
+  const maximum = Math.min(24, Math.max(baseMaximum, inventory.statements.length));
 
   return {
     version: "continuity.proof-contract.v1",
@@ -80,7 +105,16 @@ export function compileProofContract(request: QueryRequest): ProofContract {
     dependenciesRequired,
     transitionCertificateRequired,
     citationBudget: { minimum: 1, maximum },
-    rationale: rationaleFor(routeClass, closureDemand),
+    claimInventory: {
+      materialStatements: inventory.profile.materialStatements,
+      numericClaims: inventory.profile.numericClaims,
+      suppliedCitations: inventory.profile.suppliedCitations,
+      identifiers: inventory.profile.identifiers,
+      requiresBroadRetrieval: inventory.profile.requiresBroadRetrieval,
+    },
+    rationale: `${rationaleFor(routeClass, closureDemand)}${inventory.profile.requiresBroadRetrieval
+      ? " The request contains several exact-value, locator, identifier, or independently checkable claims, so retrieval must preserve claim-by-claim closure."
+      : ""}`,
   };
 }
 

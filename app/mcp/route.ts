@@ -53,6 +53,11 @@ import {
 } from "@/lib/continuity/mcp-context";
 import { CONTINUITY_MCP_CONTRACT_VERSION, continuityMcpTools } from "@/lib/continuity/mcp-contract";
 import {
+  auditClaimClosure,
+  auditRequestCoverage,
+  CLAIM_CLOSURE_JSON_SCHEMA,
+} from "@/lib/continuity/claim-closure";
+import {
   buildQuestionGraph,
   planQuestionGraphUse,
   queryQuestionGraph,
@@ -98,6 +103,7 @@ const EXPOSED_TOOL_NAMES = [
   "continuity_analyze_change",
   "continuity_compile_material",
   "continuity_inspect_public_repository",
+  "continuity_validate_draft",
 ] as const;
 type ExposedToolName = typeof EXPOSED_TOOL_NAMES[number];
 type ReviewedToolName = Extract<ExposedToolName,
@@ -139,6 +145,7 @@ const TOOL_TITLES: Record<ExposedToolName, string> = {
   continuity_analyze_change: "Analyze a Vibe Code Simulator change",
   continuity_compile_material: "Verify uploaded or pasted material",
   continuity_inspect_public_repository: "Ask about a public GitHub repository",
+  continuity_validate_draft: "Check a completed answer",
 };
 
 const REVIEWED_TOOL_OUTPUT_SCHEMA = {
@@ -438,14 +445,70 @@ const REPOSITORY_TOOL_OUTPUT_SCHEMA = {
   },
 } as const;
 
+const DRAFT_VALIDATION_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["contractVersion", "routerVersion", "sourceKind", "sourceContext", "coverage", "draftBinding", "claimClosure", "requestCoverage"],
+  properties: {
+    contractVersion: { type: "string", enum: [CONTINUITY_MCP_CONTRACT_VERSION] },
+    routerVersion: { type: "string", enum: [AUTHORITY_ROUTER_VERSION] },
+    sourceKind: { type: "string", enum: ["uploaded_text", "public_github_excerpts"] },
+    sourceContext: {
+      type: "object", additionalProperties: false,
+      required: ["kind", "repository", "pinnedCommit", "scope"],
+      properties: {
+        kind: { type: "string", enum: ["direct_upload", "public_github_excerpts"] },
+        repository: { type: ["string", "null"] },
+        pinnedCommit: { type: ["string", "null"] },
+        scope: {
+          type: ["object", "null"], additionalProperties: false,
+          required: ["id", "label", "rootPath"],
+          properties: { id: { type: "string" }, label: { type: "string" }, rootPath: { type: "string" } },
+        },
+      },
+    },
+    coverage: {
+      type: "object", additionalProperties: false,
+      required: ["submittedPacket", "completeForProjectCorpus", "meaning"],
+      properties: {
+        submittedPacket: { type: "string", enum: ["closed"] },
+        completeForProjectCorpus: { type: "boolean", enum: [false] },
+        meaning: { type: "string" },
+      },
+    },
+    draftBinding: {
+      type: "object", additionalProperties: false,
+      required: ["algorithm", "digest", "utf8Bytes"],
+      properties: {
+        algorithm: { type: "string", enum: ["sha256"] },
+        digest: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
+        utf8Bytes: { type: "integer" },
+      },
+    },
+    claimClosure: CLAIM_CLOSURE_JSON_SCHEMA,
+    requestCoverage: {
+      type: "object", additionalProperties: false,
+      required: ["version", "checked", "safeForFinalAnswer", "findings", "unaddressed"],
+      properties: {
+        version: { type: "string" }, checked: { type: "boolean" }, safeForFinalAnswer: { type: "boolean" },
+        findings: { type: "array", items: { type: "object" } },
+        unaddressed: { type: "array", items: { type: "string" } },
+      },
+    },
+  },
+} as const;
+
 function outputSchemaFor(name: ExposedToolName) {
   if (name === "continuity_compile_material") return CONTEXT_TOOL_OUTPUT_SCHEMA;
   if (name === "continuity_inspect_public_repository") return REPOSITORY_TOOL_OUTPUT_SCHEMA;
+  if (name === "continuity_validate_draft") return DRAFT_VALIDATION_OUTPUT_SCHEMA;
   return REVIEWED_TOOL_OUTPUT_SCHEMA;
 }
 
 function isContextTool(name: ExposedToolName): name is ContextToolName {
-  return name === "continuity_compile_material" || name === "continuity_inspect_public_repository";
+  return name === "continuity_compile_material"
+    || name === "continuity_inspect_public_repository"
+    || name === "continuity_validate_draft";
 }
 
 function annotationsFor(name: ExposedToolName) {
@@ -502,6 +565,7 @@ export async function POST(request: Request): Promise<Response> {
         "Never treat ambient ChatGPT attachments, Codex working-directory files, or the phrase 'this repository' as a repository selected through Continuity Lab.",
         "For a public GitHub question, require an explicit URL, call continuity_inspect_public_repository, resolve any named project scope, then pass its excerpts and unchanged scopeReceipt to continuity_compile_material.",
         "For uploads, pass only question-relevant text. Copy subject, predicate, and any non-empty object byte-for-byte from the exact quote; rejected or absent claims remain unknown. Omit explicitId unless that exact ID occurs in the entity quote.",
+        "After composing a multi-claim answer, use continuity_validate_draft on the exact final text, original request, and unchanged submitted documents. Do not present a failed draft as verified; the receipt is packet-scoped and never grants canon authority.",
         "For downstream machine use, prefer entityPackage and obey its ambiguity sets and QA action-safety flags.",
         "identityLinks are suggest-only lexical candidates with uncalibrated scores; never apply them automatically. domainProfile is an inactive schema-on-read proposal until a second compile call supplies knowledgeReview bound to the exact returned fingerprints.",
         "Reviewed identity decisions preserve source forms, cannot lexically merge different explicit IDs, and require parser_binding for code or opaque symbols. The keyless server treats review authority as caller-attested rather than authenticated project canon.",
@@ -577,7 +641,9 @@ export async function POST(request: Request): Promise<Response> {
       try {
         const result = name === "continuity_compile_material"
           ? compileMaterialTool(argumentsValue)
-          : await inspectRepositoryTool(argumentsValue);
+          : name === "continuity_validate_draft"
+            ? await validateDraftTool(argumentsValue)
+            : await inspectRepositoryTool(argumentsValue);
         return rpcResult(id, result);
       } catch (error) {
         const code = error instanceof McpContextError
@@ -705,9 +771,27 @@ function queryForTool(name: ReviewedToolName, input: JsonObject): QueryRequest {
 function validateContextToolArguments(name: ContextToolName, input: JsonObject): string | null {
   const allowed = name === "continuity_compile_material"
     ? new Set(["question", "sourceContext", "documents", "claims", "entityMentions", "relations", "knowledgeReview", "previousSnapshot", "snapshotMode"])
-    : new Set(["repository", "question", "requestedRef", "projectScope"]);
+    : name === "continuity_validate_draft"
+      ? new Set(["draft", "request", "sourceContext", "documents"])
+      : new Set(["repository", "question", "requestedRef", "projectScope"]);
   const unexpected = Object.keys(input).filter((key) => !allowed.has(key));
   if (unexpected.length) return `Unexpected argument${unexpected.length === 1 ? "" : "s"}: ${unexpected.join(", ")}.`;
+  if (name === "continuity_validate_draft") {
+    if (typeof input.draft !== "string" || !input.draft.trim()) return "draft is required.";
+    if (new TextEncoder().encode(input.draft).byteLength > 12_000) return "draft exceeds 12000 UTF-8 bytes.";
+    if (input.request !== undefined && (typeof input.request !== "string" || !input.request.trim())) return "request must be a non-empty string when provided.";
+    if (typeof input.request === "string" && new TextEncoder().encode(input.request).byteLength > 20_000) return "request exceeds 20000 UTF-8 bytes.";
+    if (!Array.isArray(input.documents) || input.documents.length < 1) return "documents must be a non-empty array.";
+    if (input.sourceContext !== undefined) {
+      if (!isRecord(input.sourceContext)) return "sourceContext must be an object.";
+      const unexpectedContextKeys = Object.keys(input.sourceContext).filter((key) => key !== "kind" && key !== "receipt");
+      if (unexpectedContextKeys.length) return `Unexpected sourceContext argument${unexpectedContextKeys.length === 1 ? "" : "s"}: ${unexpectedContextKeys.join(", ")}.`;
+      if (input.sourceContext.kind !== "direct_upload" && input.sourceContext.kind !== "public_github_excerpts") return "sourceContext.kind must be direct_upload or public_github_excerpts.";
+      if (input.sourceContext.kind === "direct_upload" && input.sourceContext.receipt !== undefined) return "Direct uploads must not include a repository scope receipt.";
+      if (input.sourceContext.kind === "public_github_excerpts" && input.sourceContext.receipt === undefined) return "Public GitHub excerpts require the scope receipt returned by continuity_inspect_public_repository.";
+    }
+    return null;
+  }
   if (typeof input.question !== "string" || !input.question.trim()) return "question is required.";
   const questionLimit = name === "continuity_compile_material" ? MAX_TEXT_LENGTH : 4_096;
   if (new TextEncoder().encode(input.question).byteLength > questionLimit) {
@@ -749,6 +833,71 @@ function validateContextToolArguments(name: ContextToolName, input: JsonObject):
     return "projectScope must be a non-empty scope ID or repository-relative path no longer than 240 characters.";
   }
   return null;
+}
+
+async function validateDraftTool(input: JsonObject) {
+  const suppliedContext = isRecord(input.sourceContext) ? input.sourceContext : undefined;
+  const sourceMode = suppliedContext?.kind === "public_github_excerpts"
+    ? "public_github_excerpts" as const : "direct_upload" as const;
+  const rawDocuments = (input.documents as unknown[]).map((document) => isRecord(document)
+    ? {
+        name: typeof document.name === "string" ? document.name : "",
+        text: typeof document.text === "string" ? document.text : "",
+        locator: typeof document.locator === "string" ? document.locator : undefined,
+      }
+    : { name: "", text: "", locator: undefined });
+  // Reuse the existing packet boundary for document name, size, duplication,
+  // and instruction-risk validation. The draft checker never executes source
+  // text and does not accept caller-authored evidence IDs.
+  buildMcpContextPacket({ documents: rawDocuments.map(({ name, text }) => ({ name, text })) });
+
+  let repositoryReceipt: RepositoryScopeReceipt | null = null;
+  if (sourceMode === "public_github_excerpts") {
+    const validation = validateRepositoryScopeReceipt(suppliedContext?.receipt, rawDocuments);
+    if (!validation.ok) throw new McpContextError(validation.message, "repository_scope_mismatch");
+    repositoryReceipt = validation.receipt;
+  }
+  const sourceBinding = repositoryReceipt
+    ? {
+        kind: sourceMode,
+        repository: repositoryReceipt.repository,
+        pinnedCommit: repositoryReceipt.pinnedCommit,
+        scope: repositoryReceipt.scope,
+      }
+    : { kind: sourceMode, repository: null, pinnedCommit: null, scope: null };
+  const draft = (input.draft as string).trim();
+  const claimClosure = auditClaimClosure(draft, rawDocuments);
+  const requestCoverage = auditRequestCoverage(typeof input.request === "string" ? input.request.trim() : "", draft, rawDocuments);
+  const encoded = new TextEncoder().encode(draft);
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  const structuredContent = {
+    contractVersion: CONTINUITY_MCP_CONTRACT_VERSION,
+    routerVersion: AUTHORITY_ROUTER_VERSION,
+    sourceKind: sourceMode === "public_github_excerpts" ? "public_github_excerpts" as const : "uploaded_text" as const,
+    sourceContext: sourceBinding,
+    coverage: {
+      submittedPacket: "closed" as const,
+      completeForProjectCorpus: false as const,
+      meaning: "Every surfaced draft claim was checked against the exact submitted packet. The packet is not presumed to contain the entire project or to decide canon authority.",
+    },
+    draftBinding: {
+      algorithm: "sha256" as const,
+      digest: `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`,
+      utf8Bytes: encoded.byteLength,
+    },
+    claimClosure,
+    requestCoverage,
+  };
+  return {
+    content: [{
+      type: "text",
+      text: claimClosure.safeForFinalAnswer && requestCoverage.safeForFinalAnswer
+        ? `Draft check passed for the submitted packet: ${claimClosure.statements.length} material statement(s) checked. This does not grant project-canon status.`
+        : `Draft needs review: ${claimClosure.unresolved.length + requestCoverage.unaddressed.length} unresolved or omitted numeric, locator, identifier, or statement check(s). Do not describe the draft as verified.`,
+    }],
+    structuredContent,
+    isError: false,
+  };
 }
 
 function compileMaterialTool(input: JsonObject) {

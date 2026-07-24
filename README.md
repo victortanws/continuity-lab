@@ -1,15 +1,15 @@
 # Continuity Lab
 
-Continuity Lab helps people ask practical questions about a story, game,
+Continuity Lab is a tool for long-form AI-assisted game or narrative development. It helps people ask practical questions about a story, game,
 codebase, policy, archive, or other collection of material without losing track
 of what the material actually says.
 
-Add your files or a public GitHub repository. Ask what is true, what can happen
+Add your files or a public GitHub repository, ask what is true, what can happen
 next, whether two sources disagree, or what else must change if you revise part
 of the project. Continuity Lab gives a plain-language answer, shows the sources
 behind it, and keeps suggestions separate from established facts.
 
-The worked example uses **Vibe Code Simulator**. Its founder eventually needs
+The [worked example](https://continuity-lab-vcs.synthesys.chatgpt.site/) uses **Vibe Code Simulator**. Its founder eventually needs
 to pay $47,000 for his grandmother's operation. The current prototype covers
 only Days 7–8, starts the player with $700, and cannot earn enough during that
 slice. It also lacks the hospital-payment action and saved result that would
@@ -20,7 +20,7 @@ and turns them into a concrete development plan.
 
 ### Try the worked example
 
-1. Open the site. The Vibe Code Simulator example is already visible.
+1. Open the [worked example](https://continuity-lab-vcs.synthesys.chatgpt.site/). The Vibe Code Simulator example is already visible.
 2. Choose one of the example questions, such as:
 
    - “Can the player earn and pay $47,000 in the current prototype?”
@@ -39,34 +39,6 @@ and turns them into a concrete development plan.
 The light/dark control in the top navigation remembers your preference on that
 device.
 
-### Ask about your own project
-
-1. Choose **Upload files** to add text, Markdown, structured data, or a supported
-   searchable document. You can also paste text directly.
-2. Or choose **GitHub repository** and paste a public repository URL. Continuity
-   Lab looks for likely sources of truth—such as `STORY-CANON.md`, a story
-   bible, product contract, or decision record—and compares them with relevant
-   code and tests. In Vibe Code Simulator, this is how it found
-   `docs/STORY-CANON.md`. A filename or folder is a routing clue, not automatic
-   proof that a file is approved canon. If the repository contains more than
-   one application, story, or worked example, Continuity Lab lists the possible
-   project scopes before reading across them. Select the project you mean; it
-   will not blend their sources. Leave the version field blank unless you need
-   a particular branch, release, or commit.
-3. Ask a focused question. For example:
-
-   - “Do these two character descriptions refer to the same person?”
-   - “What must happen before this scene can occur?”
-   - “Do the design document and the code disagree about this price?”
-   - “If I remove this quest, which later scenes or tests may be affected?”
-
-4. Treat a missing answer honestly. If the source cannot be read, the relevant
-   passage was not supplied, or two possible identities cannot be separated,
-   Continuity Lab should say so rather than invent an answer.
-5. After you analyze your own files or repository, choose **Download my
-   results** to save the answer and its supporting receipt. The worked example
-   does not show a download control because it is not your project data.
-
 ### Use it from ChatGPT
 
 The hosted MCP address is public, read-only, and ready for ChatGPT to reach from
@@ -82,6 +54,62 @@ To connect it:
 3. Use the name **Continuity Lab** and paste the MCP address above.
 4. Start a new chat, choose **+ → More → Continuity Lab**, then ask a question
    normally.
+5. Give Continuity Lab something to examine in one of three ways:
+   - **Paste text directly:** paste a relevant passage, script, specification,
+     table, or set of notes into the conversation.
+   - **Attach files:** add one or more files to ChatGPT and ask a focused
+     question about them. TXT, Markdown, JSON, YAML, XML, CSV, and TSV are the
+     most direct formats. PDF, DOCX, PPTX, XLSX, screenshots, and scans work
+     only when ChatGPT can first read or extract the relevant text.
+   - **Provide a public GitHub URL:** include the complete repository URL and
+     ask a focused question. Continuity Lab pins the repository to one commit
+     and searches a bounded set of relevant files. It looks for likely sources
+     of truth—such as a story bible, product contract, decision record, or
+     `docs/STORY-CANON.md`—and compares them with relevant implementation and
+     test evidence. A filename or folder is a routing clue, not automatic proof
+     that the material is approved canon.
+6. When using a repository, name the project you mean. Do not ask only
+   “What is canon in this repository?” because ChatGPT may have several
+   repositories or projects in view. Instead, ask:
+
+   > In `https://github.com/owner/repository`, what is considered canon?
+
+   If the repository contains several products, stories, or examples,
+   Continuity Lab will return the possible project scopes and ask you to choose
+   one before continuing.
+7. Ask questions about facts, identity, consistency, dependencies, or proposed
+   changes. For example:
+   - “Who does Grandma refer to in this passage?”
+   - “Do these two files disagree about the operation cost?”
+   - “Can this event happen in the current implementation?”
+   - “What must happen before this ending becomes reachable?”
+   - “What would be affected if I removed this quest?”
+   - “Is this function name established, proposed, or possibly misspelled?”
+   - “Does the cited file and line actually support this claim?”
+8. For a long audit or proposed rewrite, ask ChatGPT:
+
+   > Before answering, use Continuity Lab to verify the important factual claims
+   > against the supplied material. Show the evidence for each correction and
+   > clearly label anything that remains uncertain or merely proposed.
+
+   This helps catch incorrect amounts, unsupported citations, unknown IDs, and
+   disputed claims that a fluent answer may otherwise skip.
+9. Read uncertainty literally. If a file cannot be read, a passage was not
+   supplied, two identities remain ambiguous, or the inspected repository
+   excerpts are incomplete, Continuity Lab should say so. It will not invent
+   missing evidence.
+10. Remember the current boundaries:
+    - The MCP accepts text and extracted excerpts—not raw binary documents.
+    - It does not automatically inherit every attachment or local file visible
+      to ChatGPT; ChatGPT must pass the relevant text to it.
+    - Repository access currently supports public GitHub repositories, not
+      private repositories, uncommitted local files, or arbitrary website URLs.
+    - Large files and repositories are narrowed to question-relevant excerpts.
+      The result should not be treated as proof that every file in the project
+      was inspected.
+    - All five deployed tools are read-only. Continuity Lab cannot edit files, push
+      commits, approve canon, or change the connected repository.
+    - This ChatGPT path does not require the user to provide an OpenAI API key.
 
 For a repository question, include the public GitHub URL in the message. Do not
 ask only “What is canon in this repository?” ChatGPT can have other files or a
@@ -145,6 +173,11 @@ the current [OpenAI Apps SDK connection guide](https://developers.openai.com/app
   not merely whether the outcome is mentioned somewhere.
 
 ## Autonomous game development
+
+The governing sequence for evolving these capabilities is recorded in
+[`docs/STAGED-EVOLUTION.md`](docs/STAGED-EVOLUTION.md). It preserves the product
+direction, stage gates, and non-negotiable boundaries outside any single model
+or conversation.
 
 Continuity Lab can already act as a read-only reviewer and planning layer for a
 game-development agent. It can pin the version being changed, find relevant
@@ -225,42 +258,39 @@ queues, and audit receipts. The model and agent can vary by organization; the
 stable layer is the evidence, entity, proof, proposal, approval, and revision
 protocol. This is a roadmap, not a capability claimed by the current MVP.
 
-## How we collaborated with Codex
+## How I collaborated with Codex
 
 This project was developed as a long-running collaboration between the product
 owner and Codex rather than as a single generated application.
 
-### Where Codex accelerated the work
+As noted in the Readme for Vibe Code Simulator, Codex was crucial in accelerating the workflow for developing my projects, and without it, many things would not even have been possible. indeed, without Codex's GPT Image-2, the assets for this project would not have been possible, but neither would the process for generating assets manifests, because I would not have known about IDs or otherwise had I not asked about what constituted a good structure to create game assets and to iterate on that process through rapid iteration on a timed schedule and multiple overnight passes, which in turn were processes that I proposed and tested in collaboration with Codex. It is true that Codex articulated a large number of things, including architectures, structures, and also domain knowledge, which I proceeded to integrate with my personal sensitivities and awareness of the problems, but much of this would not have been possible if not for the interplay of thinking, receiving rapid feedback, and iteration that Codex and GPT-5.6 made possible.
 
-- It inspected the evolving Slap the Heavens and Vibe Code Simulator projects
-  and helped identify the reusable idea beneath them: preserve truth, identity,
-  sequence, and consequences across many files and many development sessions.
-- It converted repeated manual continuity checks into an evidence compiler,
-  authority router, dependency reasoning layer, reviewed adapters, upload and
+### Specific contributions by GPT-5.6 Sol
+
+- It abstracted lessons and patterns learned from a prior project (Slap The Heavens manhwa generator - discussed in introduction video) into a new and generalizable architecture, and was able to articulate these patterns in a way that I could work with them in implementing
+the project architecture.
+- It converted repeated manual continuity checks into an evidence compiler, authority router, dependency reasoning layer, reviewed adapters, upload and
   GitHub boundaries, MCP tools, security checks, and regression tests.
-- It compared naive model use with structured routing, recorded failures, and
-  iterated on the architecture instead of treating a persuasive answer as proof
+- It conducted experiments and extensive red teaming, was subjected to a wide variety of challenges under a mixture of conditions, and wrote reports and drafted visualizations about how it had been tor... Tested!
+- It compared naive model use with structured routing, recorded failures, and iterated on the architecture instead of treating a persuasive answer as proof
   that the system worked.
 - It built and repeatedly revised the site, deployment path, documentation, and
   evaluation runner while keeping the reviewed architecture and sealed test
   candidate separate from presentation-only changes.
+- It built MCP server architecture, created the logo for it, and eventually also assisted with the coordination of the implementation of this project as an MCP server.
 
 ### Decisions made by the product owner
 
 The product owner set the core direction and repeatedly corrected the system
 when it became too narrow or too technical. Important decisions included:
 
-- generalize beyond one manhua or one game;
-- keep Vibe Code Simulator as a compelling worked example, not the definition
-  of the product;
-- accept incomplete and contradictory material without pretending it is clean;
-- separate proposals from established truth;
-- preserve evidence so every important conclusion can point back to a source;
-- make file uploads, repositories, ChatGPT/MCP use, causality, and future visual
+- Testing naive ChatGPT versus Continuity Lab to ascertain to what extent gains were made through architecture as opposed to the general multimodal intellectual capacity of GPT 5.6 Sol, and
+to what extent it would be possible to make improvements over GPT 5.6's performance.
+- Keeping Vibe Code Simulator as a compelling worked example;
+- Scoping Continuity Lab for future generalizability in the direction of autonomous game or narrative development, by proposing architectural decisions like file uploads, repositories, ChatGPT/MCP use, causality, and future visual
   audits part of one interoperable architecture;
-- optimize expensive review work without spawning unlimited checks; and
-- rewrite the interface in ordinary language when implementation terminology
-  leaked into the public experience.
+- Decisions to test the security of ChatGPT, to observe drift, and to take action in order to codify the development of Continuity Lab as a human in the loop.
+
 
 ### How GPT-5.6 and Codex contributed
 
@@ -276,46 +306,6 @@ itself. The application preserves where information came from, what version it
 belongs to, whether sources disagree, and whether the available evidence is
 complete enough to support the requested conclusion.
 
-## Try it out in the repo
-
-### Run locally
-
-Prerequisite: Node.js `>=22.13.0`.
-
-```bash
-npm install
-npm run dev
-npm run test:continuity
-npm run build
-```
-
-The project uses the existing vinext/Sites build and does not use
-`wrangler.jsonc`. On Sites, the public transport is `/api/mcp`; paste that exact
-address into ChatGPT. The same implementation is also available at `/mcp` on
-compatible direct-worker and local hosts.
-
-### Run the presenter-owned GPT-5.6 API example
-
-The public page deliberately uses the reviewed deterministic answer. To compare
-that answer with one real model run on your own API account, keep the key in your
-terminal environment and run the bounded presenter script:
-
-```bash
-export OPENAI_API_KEY="your_api_key_here"
-npm run demo:api
-```
-
-The script calls the existing Continuity Lab reasoner with `gpt-5.6-sol`, the
-same frozen Vibe Code Simulator question and evidence scope, one provider-call
-budget, and a 60-second deadline. It prints the structured verdict, citations,
-entities, dependencies, and reachability result as JSON. It does not place the
-key in browser code, commit it to Git, or make the public website spendable by
-anonymous visitors.
-
-To connect a deployed build to ChatGPT, follow the current
-[OpenAI Apps SDK connection guide](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt).
-`localhost` is useful for development, but a remote ChatGPT client needs a
-reachable HTTPS endpoint.
 
 ## For the Technical-Minded
 
@@ -435,44 +425,45 @@ to question-relevant excerpts rather than copied wholesale.
 
 ### Keys, subscriptions, and current limits
 
-The five MCP tools are currently stateless, read-only, and declared `noauth`.
-They make no OpenAI API call. This means a user's ChatGPT subscription can
+The five MCP tools are currently project-stateless, read-only, and declared
+`noauth`. They do not persist submitted project material, reviewed canon
+decisions, or conversational memory, although the public repository inspector
+does retain service-level rate-limit accounting. They make no OpenAI API call.
+This means a user's ChatGPT subscription can
 provide the conversational reasoning while the MCP performs deterministic
 verification; this path does not require you or the user to put an OpenAI API
 key into this application.
 
-That does not turn a ChatGPT subscription into API credit. The website's live
-GPT-5.6 button and the persisted arbitrary-workspace retrieval/query route still
-need a server-side `OPENAI_API_KEY`. ChatGPT also does not forward a custom API
-key to an MCP server, as explained in the [Apps SDK authentication
+That does not turn a ChatGPT subscription into API credit. The persisted
+arbitrary-workspace retrieval/query route and presenter-owned API script still
+need a server-side `OPENAI_API_KEY`. The current public page does not expose a
+paid live-model control. ChatGPT also does not forward a custom API key to an
+MCP server, as explained in the [Apps SDK authentication
 guide](https://developers.openai.com/apps-sdk/build/auth). A future direct API
 or bring-your-own-key mode would therefore be a separate, encrypted credential
 and billing design—not a text field in a tool call. Private GitHub access will
 likewise require a scoped GitHub OAuth/App flow; it must not reuse an OpenAI
 credential.
 
-The public-repository tool is intentionally a preview: one immutable commit,
-at most eight provider calls, six files read, 20 KiB of returned excerpts, a
-20-second deadline, no automatic retry, a durable service-global daily
-reservation before any GitHub call, and no corpus-wide absence claim. The
-upload compiler accepts source assertions, not project truth. Its graph is
-question-scoped and can traverse verified claims plus simple, exact-evidence-
-bound precondition, consequence, and before edges. Negative relationship
-claims and compound `or`/`unless` logic remain visible prose rather than being
-flattened into misleading edges. This is not yet a durable whole-corpus
-knowledge graph, alternative-path solver, or automatic natural-language
-causality theorem prover. The v3.8 snapshot is a portable integrity receipt and
+This is not yet a durable whole-corpus knowledge graph, alternative-path solver, or automatic natural-language
+causality theorem prover that exposes an API interoperable with modern game development. The v3.8 snapshot is a portable integrity receipt and
 incremental comparison boundary, not hidden server memory. Public GitHub
 excerpts remain question-scoped, so a missing excerpt is never reported as a
 deleted repository fact.
+
+Future versions of Continuity Lab could evolve from a question-answering tool into a durable protocol for agentic development across long-running narrative projects.
+Instead of treating every request as an isolated interaction, Continuity Lab could maintain a versioned project workspace containing its sources, entities, relationships, rules, decisions, unresolved questions, and causal dependencies.
+New files and repository commits could update this workspace incrementally rather than requiring the entire project to be reconstructed for every question.
+This would extend the current project-stateless public MCP into explicit, auditable project memory—not hidden conversational memory. Every stored conclusion would remain tied to its source, revision, confidence, authority, and approval status.
+The system could distinguish established canon from implementation state, proposals, abandoned ideas, historical versions, and unresolved contradictions.
 
 ### Router v3.8 compatibility
 
 The public transport negotiates current and supported legacy MCP protocol
 versions, and its stable data contract remains `continuity.mcp.v1`.
 Authority-router version `3.8.0` is advertised separately
-as namespaced tool metadata, so router changes do not rename tools or resource
-identities. The three v3.2 reviewed-sample tools keep their existing names,
+as namespaced tool metadata, so router changes do not rename tools or alter
+stable output contracts. The three v3.2 reviewed-sample tools keep their existing names,
 inputs, and output shape; v3.3 added the two context tools, v3.4 added a
 server-authored proof contract and target-prioritized context capsule, and v3.5
 added project-boundary resolution before repository retrieval. Version 3.6
@@ -561,7 +552,9 @@ The receipt remains caller-attested because the public MCP uses no
 authentication. Consequently it is useful as a transparent reviewed
 projection but reports `projectCanon: false` and remains unsafe for unattended
 canon mutation. A repository maintainer can make it durable by storing the
-review envelope and returned receipt in an approved project path. A future
+review envelope and returned receipt in an approved project path. The current
+public MCP does not automatically discover or apply that record later; a client
+must explicitly load and resubmit it. A future
 authenticated workspace can attach actual reviewer identity and approval
 policy without changing the evidence or decision formats.
 
@@ -575,26 +568,26 @@ commits, because question-focused retrieval is not a complete tree index.
 
 ### Runtime shape
 
-- `app/api/continuity/query`: revision-pinned multi-lane retrieval,
+- `/api/continuity/query` (`app/api/continuity/query/route.ts`): revision-pinned multi-lane retrieval,
   query-scoped exact-span claim/entity compilation, typed authority and
   citation-use validation, server-owned transition proof when a compiled graph
   exists, and sealed GPT-5.6 synthesis
-- `app/api/continuity/sources`: immutable uploaded source versions with a
+- `/api/continuity/sources` (`app/api/continuity/sources/route.ts`): immutable uploaded source versions with a
   server-validated narrative/reference/proposal document type
-- `app/api/continuity/repositories`: commit-pinned GitHub snapshot sync and status
-- `app/api/mcp` (hosted transport) and `app/mcp` (direct-worker compatibility):
-  stateless read-only MCP transport for the immutable reviewed VCS
+- `/api/continuity/repositories` (`app/api/continuity/repositories/route.ts`): commit-pinned GitHub snapshot sync and status
+- `/api/mcp` (hosted transport) and `/mcp` (direct-worker compatibility):
+  project-stateless read-only MCP transport for the immutable reviewed VCS
   sample, exact-span text packets, and bounded anonymous public-GitHub excerpts;
-  it does not expose arbitrary persisted or private workspaces
+  it does not expose arbitrary persisted or private workspaces; service-level
+  quota accounting is persisted separately
 - D1: project, source, snapshot, provider-binding, and analysis records
 - R2: uploaded bytes, repository blobs, manifests, and retrieval packets
 - OpenAI vector stores: replaceable retrieval projections, isolated per repository snapshot
 
-The sample answer is a reviewed deterministic demonstration. Its icon-only live
-control reruns the exact displayed question and frozen analysis scope through the
-same server route with GPT-5.6 Sol; it never substitutes whatever text happens to
-remain in the editor. Without `OPENAI_API_KEY`, the control reports setup as
-incomplete rather than presenting the reviewed answer as a live result.
+The sample answer is a reviewed deterministic demonstration. The underlying
+query route can run the same bounded evidence scope through GPT-5.6 Sol when
+server credentials and trusted ingress are configured, but that paid live-run
+control is not currently exposed on the public page.
 
 Ordinary questions do not automatically pay the cost or visual complexity of a
 full causal audit. The server chooses a minimum safe route, applies fixed
@@ -633,11 +626,13 @@ requires a trusted complete transition registry or reviewed adapter.
 
 ### Current capability boundary
 
-- **Upload and paste:** up to 12 files per browser selection, sent and stored
-  sequentially; UTF-8 text and supported structured/document formats. PDF and
-  Office are operator-only previews.
+- **Upload and paste:** the public demonstration receives files through ChatGPT,
+  which passes bounded relevant text to the MCP. Separately, the authenticated
+  persisted-source backend can accept up to 12 files per browser selection, but
+  that upload form is not currently exposed on the public Build Week site. PDF
+  and Office are operator-only previews.
 - **Entity resolution:** exact-span, question-scoped candidates with cited
-  ambiguity, available through both the persisted query flow and the stateless
+  ambiguity, available through both the persisted query flow and the project-stateless
   text-packet MCP. There is no durable corpus-wide entity/alias graph yet.
 - **Questions:** cited revision-pinned answers when retrieval is configured,
   with explicit conflict and coverage. General causal reachability remains
@@ -648,10 +643,11 @@ requires a trusted complete transition registry or reviewed adapter.
   observations; no raw image/OCR adapter and no browser/API route yet.
 - **GitHub:** bounded commit-pinned snapshot sync; no webhook, incremental
   GitHub App flow, or live working-tree mount.
-- **MCP:** an executable stateless `/api/mcp` hosted transport for five read-only
+- **MCP:** an executable project-stateless `/api/mcp` hosted transport for five read-only
   tools, with `/mcp` retained for compatible direct-worker and local hosts:
   three over `vcs-demo-r2`, one exact-span text-packet compiler, and one bounded
   anonymous public-GitHub inspector with pre-retrieval project-scope discovery.
+  It retains service-level quota accounting but not submitted project material.
   Authenticated persisted/private workspaces and resource handlers are not
   implemented.
 
@@ -715,22 +711,30 @@ before storage; their encoded bytes count toward upload quotas. `validFrom`
 accepts exact ISO dates or explicit story ordinals (for example `Day 8`), not
 uninterpreted temporal prose.
 
-The browser accepts UTF-8 TXT/MD/Markdown/HTML/JSON/YAML/XML/CSV/TSV. An
-explicitly allowlisted operator may also preview searchable PDF, DOC/DOCX, and
+The persisted upload backend accepts UTF-8 TXT/MD/Markdown/HTML/JSON/YAML/XML/CSV/TSV. An
+explicitly allowlisted operator may also preview PDF, DOC/DOCX, and
 PPTX ingestion. File signatures are verified; Office archives receive entry
 and decompression limits; obvious text credentials are rejected before
 storage. Binary-document contents are not yet credential-scanned, so ordinary
 hosted users are refused. “Indexed” means the provider accepted the file, not
-that every page or entity was readable. Image-only/scanned PDFs, screenshots,
-standalone images, XLS/XLSX, EPUB, and RTF are rejected in this MVP. Paste or
-upload a text description instead; OCR and region-grounded image ingestion are
-future adapters.
+that every page or entity was readable. The application does not independently
+determine whether a PDF is searchable or image-only. Scanned and image-only PDFs
+are therefore unsupported for reliable evidence extraction and may yield no
+usable evidence. Screenshots, standalone images, XLS/XLSX, EPUB, and RTF are
+rejected by the current persisted-upload policy. Paste or upload a text
+description instead; OCR and region-grounded image ingestion are future adapters.
 
-See `docs/EVALUATION-POSTMORTEM.md` for the earlier output-contract confound,
-response-economy finding, and the fresh v3.1/v3.2 reserve regressions. Neither
-version beat its baseline. v3.3 therefore requires a newly sealed reserve;
-broad superiority, lower provider cost, and faster answers are not claimed
-until that evaluation is complete.
+Historical evaluations found that architectural additions did not automatically
+improve answer quality. v3.3 scored below the historical baseline. v3.4 improved
+the retrospective benchmark but did not pass the original five-percentage-point
+superiority gate. v3.8 remained broadly comparable with the baseline across its
+retrospective and direct-API evaluations. These results support specific
+improvements in evidence structure, project scoping, entity handoff, and claim
+verification, but they do not establish broad model-quality superiority, lower
+provider cost, faster answers, or external validity across arbitrary projects.
+A genuinely new blind multi-domain holdout is still required before making those
+claims. See the versioned evaluation post-mortems for scores, limitations, and
+failure analysis.
 
 See `docs/EVIDENCE-COMPILER.md` for the exact-quote, server-owned provenance
 boundary used by live workspaces and the remaining durable-entity/OCR limits.
@@ -813,7 +817,6 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 - `npm run dev`: start local development
 - `npm run build`: verify the vinext build output
 - `npm test`: build the application and run the rendered and continuity suites
-- `npm run demo:api`: run the bounded presenter-owned GPT-5.6 comparison (requires `OPENAI_API_KEY`)
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
 ### Learn More

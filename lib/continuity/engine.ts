@@ -14,6 +14,7 @@ import { boundaryCoversExactClaimKey, verifyCompletenessBoundary } from "./compl
 import { DEFAULT_AUTHORITY_POLICY } from "./policy/default";
 import { authorityWeight, planRetrieval, routeEvidence } from "./routing/authority-router";
 import { detectEvidenceFlags } from "./evidence-flags";
+import { auditClaimClosure } from "./claim-closure";
 export { detectEvidenceFlags } from "./evidence-flags";
 
 export class ContinuityEngine {
@@ -102,6 +103,24 @@ export class ContinuityEngine {
     if (displayedAnswer !== validation.answer) {
       validation.issues.push("Replaced generated explanatory prose with a server-composed summary of validated records");
     }
+    const requestClaimClosure = auditClaimClosure(
+      request.proposedChange?.trim() || request.question,
+      routing.evidence.map((chunk) => ({
+        id: chunk.id,
+        name: chunk.title,
+        text: chunk.text,
+        locator: chunk.locator,
+      })),
+    );
+    if (requestClaimClosure.numbers.some((claim) => claim.status === "conflicted")) {
+      validation.issues.push("The request contains a numeric claim that conflicts with a relevant admitted source passage");
+    }
+    if (requestClaimClosure.citations.some((claim) => claim.status === "mismatch")) {
+      validation.issues.push("The request contains a supplied locator whose passage does not support the attached claim");
+    }
+    if (requestClaimClosure.identifiers.some((claim) => claim.status === "unknown")) {
+      validation.issues.push("The request uses an exact identifier that is neither present in admitted evidence nor explicitly proposed as new");
+    }
 
     return {
       mode: this.reasoner.mode,
@@ -113,6 +132,7 @@ export class ContinuityEngine {
       validation: {
         repaired: validation.issues.length > 0,
         issues: validation.issues,
+        claimClosure: requestClaimClosure,
         obligationResults,
       },
     };

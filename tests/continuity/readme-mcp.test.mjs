@@ -8,17 +8,17 @@ test("README and MVP explain the public MCP entry point and compatibility bounda
     readFile(new URL("../../app/page.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(readme, /^## Try it out in the repo$/m);
   assert.match(readme, /^## Quick start guide$/m);
-  assert.match(readme, /^## How we collaborated with Codex$/m);
+  assert.match(readme, /^## How I collaborated with Codex$/m);
   assert.match(readme, /^## For the Technical-Minded$/m);
+  assert.match(readme, /docs\/STAGED-EVOLUTION\.md/);
   assert.match(readme, /https:\/\/continuity-lab-vcs\.synthesys\.chatgpt\.site\/api\/mcp/);
   assert.match(readme, /public, read-only, and ready/i);
   assert.match(readme, /continuity_compile_material/);
   assert.match(readme, /continuity_inspect_public_repository/);
   assert.match(readme, /present adapters, not the limits of\s+the product/i);
   assert.match(readme, /game design documents, software\s+requirements/i);
-  assert.match(readme, /looks for likely sources of truth/i);
+  assert.match(readme, /looks for likely sources\s+of truth/i);
   assert.match(readme, /docs\/STORY-CANON\.md/);
   assert.match(readme, /routing clue, not automatic\s+proof/i);
   assert.match(readme, /does not require\s+you or the user to put an OpenAI API\s+key/i);

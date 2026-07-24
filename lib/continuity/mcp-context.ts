@@ -936,8 +936,16 @@ function questionTerms(question: string): string[] {
 
 function pathRelevance(path: string, terms: string[]): number {
   const lower = path.toLocaleLowerCase("en-US");
-  const basename = lower.split("/").at(-1) ?? lower;
-  let score = terms.reduce((total, term) => total + (lower.includes(term) ? 20 : 0), 0);
+  const segments = lower.split("/");
+  const basename = segments.at(-1) ?? lower;
+  // A project name often appears in a shared directory and would otherwise
+  // give every descendant the same large boost. Prefer filenames first,
+  // directory segments second, and incidental path substrings last.
+  let score = terms.reduce((total, term) => {
+    if (basename.includes(term)) return total + 20;
+    if (segments.slice(0, -1).some((segment) => segment === term || segment.includes(term))) return total + 5;
+    return total + (lower.includes(term) ? 2 : 0);
+  }, 0);
   if (/^(?:readme|agents|contributing)(?:\.|$)/.test(basename)) score += 5;
   if (/(?:canon|spec|decision|requirement|contract|policy|test|event|ledger|manifest)/.test(lower)) score += 4;
   if (/\.(?:md|txt|json|ya?ml|csv|ts|tsx|js|jsx)$/i.test(path)) score += 1;

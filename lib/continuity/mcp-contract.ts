@@ -261,4 +261,40 @@ export const continuityMcpTools = {
       },
     },
   },
+  continuity_validate_draft: {
+    description: "Use after drafting a multi-claim answer from uploaded text or bounded public-GitHub excerpts. Check every material statement for unresolved evidence, compare numeric values exactly, verify supplied file/line locators against the attached claim, and classify exact identifiers as existing, explicitly proposed, or unknown. Pass the original request to detect risky premises that the draft silently omitted. This read-only check does not decide project canon and does not replace continuity_compile_material; it validates only the exact draft, optional request, and submitted packet.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["draft", "documents"],
+      properties: {
+        draft: { type: "string", minLength: 1, maxLength: 12_000 },
+        request: { type: "string", minLength: 1, maxLength: 20_000 },
+        sourceContext: {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind"],
+          properties: {
+            kind: { type: "string", enum: ["direct_upload", "public_github_excerpts"] },
+            receipt: REPOSITORY_SCOPE_RECEIPT_JSON_SCHEMA,
+          },
+        },
+        documents: {
+          type: "array",
+          minItems: 1,
+          maxItems: 8,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "text"],
+            properties: {
+              name: { type: "string", minLength: 1, maxLength: 240 },
+              text: { type: "string", maxLength: 20_000 },
+              locator: { type: "string", minLength: 1, maxLength: 240 },
+            },
+          },
+        },
+      },
+    },
+  },
 } as const;

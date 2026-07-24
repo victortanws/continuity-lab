@@ -22,6 +22,7 @@ import {
   verifyCompletenessBoundary,
 } from "../completeness-boundary";
 import { compileProofContract } from "../proof-contract";
+import { claimFocusText } from "../claim-closure";
 
 export type AuthorityRoutingResult = {
   evidence: EvidenceChunk[];
@@ -244,6 +245,10 @@ export function planRetrieval(
   const base = request.proposedChange?.trim()
     ? `${request.question}\nProposed change: ${request.proposedChange.trim()}`
     : request.question;
+  const focus = claimFocusText(base);
+  const queryBase = focus
+    ? `${base}\nClaim-by-claim audit targets (verify, contradict, or leave unknown independently):\n${focus}`
+    : base;
   const definitions: Array<Omit<RetrievalLane, "query" | "maxResults"> & { purpose: string; include: boolean }> = [
     {
       id: "authority",
@@ -287,7 +292,7 @@ export function planRetrieval(
       id,
       roles,
       claimKinds: laneClaimKinds,
-      query: `${base}\nRetrieval lane ${id}: ${purpose}`,
+      query: `${queryBase}\nRetrieval lane ${id}: ${purpose}`,
       maxResults: budget.maxResultsPerLane,
     })),
   };

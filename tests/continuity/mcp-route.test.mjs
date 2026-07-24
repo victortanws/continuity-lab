@@ -57,6 +57,7 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
     "continuity_analyze_change",
     "continuity_compile_material",
     "continuity_inspect_public_repository",
+    "continuity_validate_draft",
   ]);
   for (const tool of listed.body.result.tools) {
     assert.ok(tool.title);
@@ -87,6 +88,7 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
   }
   const compileTool = listed.body.result.tools.find((tool) => tool.name === "continuity_compile_material");
   const repositoryTool = listed.body.result.tools.find((tool) => tool.name === "continuity_inspect_public_repository");
+  const draftTool = listed.body.result.tools.find((tool) => tool.name === "continuity_validate_draft");
   const reviewedAnswerTool = listed.body.result.tools.find((tool) => tool.name === "continuity_answer_question");
   assert.equal(compileTool.inputSchema.properties.claims.items.properties.object.minLength, 0);
   assert.equal(compileTool._meta["continuity/entityPackageVersion"], "continuity.entity-package.v1");
@@ -131,6 +133,24 @@ test("stateless MCP initialization advertises only read-only tools", async () =>
   assert.ok(repositoryTool.inputSchema.properties.projectScope);
   assert.ok(compileTool.inputSchema.properties.sourceContext);
   assert.match(reviewedAnswerTool.description, /Vibe Code Simulator example only/i);
+  assert.equal(draftTool.title, "Check a completed answer");
+  assert.match(draftTool.description, /numeric values exactly/i);
+  assert.deepEqual(draftTool.inputSchema.required, ["draft", "documents"]);
+  assert.ok(draftTool.outputSchema.properties.claimClosure);
+  assert.match(initialized.body.result.instructions, /continuity_validate_draft/i);
+
+  // Frozen v1 compatibility boundary: the additive validator must not change
+  // the arguments older ChatGPT clients use for the original five tools.
+  assert.deepEqual(Object.fromEntries(listed.body.result.tools.slice(0, 5).map((tool) => [
+    tool.name,
+    tool.inputSchema.required.filter((key) => key !== "projectId" && key !== "projectRevision"),
+  ])), {
+    continuity_answer_question: ["question"],
+    continuity_trace_dependencies: ["targetRef"],
+    continuity_analyze_change: ["change"],
+    continuity_compile_material: ["question", "documents"],
+    continuity_inspect_public_repository: ["repository", "question"],
+  });
 
   const ping = await call({ jsonrpc: "2.0", id: "ping", method: "ping" });
   assert.deepEqual(ping.body.result, {});
@@ -155,7 +175,7 @@ test("MCP initialization negotiates current and legacy client protocol versions"
       params: {},
     }, { "MCP-Protocol-Version": protocolVersion }));
     assert.equal(listed.status, 200);
-    assert.equal((await listed.json()).result.tools.length, 5);
+    assert.equal((await listed.json()).result.tools.length, 6);
   }
 
   const futureClient = await POST(request({
@@ -166,6 +186,66 @@ test("MCP initialization negotiates current and legacy client protocol versions"
   }, { "MCP-Protocol-Version": "" }));
   assert.equal(futureClient.status, 200);
   assert.equal((await futureClient.json()).result.protocolVersion, "2025-11-25");
+});
+
+test("the final-draft tool catches omitted numeric corrections, false locators, and undeclared identifiers", async () => {
+  const story = [
+    "# Story canon",
+    "The room may donate $0, $20, $40 or $60 during Community demo night.",
+    "Marc leads the Seed Round after evidence and accounting gates are met.",
+    "The Allocation Dinner introduces Jin Hwan and the physical hardware layer.",
+    "The Payment writes `grandma-surgery-funded`.",
+  ].join("\n");
+  const checked = await call(toolCall("draft-adversarial", "continuity_validate_draft", {
+    draft: [
+      "Community-demo donations are $75.",
+      "Greg leads the Seed Round. [STORY-CANON.md](docs/STORY-CANON.md:4)",
+      "The existing prerequisite is `grandma-hinge-complete`.",
+    ].join("\n"),
+    documents: [{ name: "docs/STORY-CANON.md", text: story }],
+  }));
+
+  assert.equal(checked.response.status, 200);
+  assert.equal(checked.body.result.isError, false);
+  const result = checked.body.result.structuredContent;
+  assert.equal(result.claimClosure.safeForFinalAnswer, false);
+  assert.equal(result.claimClosure.numbers.find((item) => item.surface === "$75").status, "conflicted");
+  assert.equal(result.claimClosure.citations[0].status, "mismatch");
+  assert.equal(result.claimClosure.identifiers.find((item) => item.surface === "grandma-hinge-complete").status, "unknown");
+  assert.match(result.draftBinding.digest, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(result.coverage.completeForProjectCorpus, false);
+  assert.match(checked.body.result.content[0].text, /needs review/i);
+});
+
+test("the final-draft tool detects a risky request claim that fluent answer prose omits", async () => {
+  const checked = await call(toolCall("draft-omission", "continuity_validate_draft", {
+    request: "Community-demo donations are $75. Marc leads the Seed Round.",
+    draft: "Marc leads the Seed Round.",
+    documents: [{
+      name: "docs/STORY-CANON.md",
+      text: "The room may donate $0, $20, $40 or $60 during Community demo night.\nMarc leads the Seed Round.",
+    }],
+  }));
+
+  const result = checked.body.result.structuredContent;
+  assert.equal(result.claimClosure.safeForFinalAnswer, true);
+  assert.equal(result.requestCoverage.checked, true);
+  assert.equal(result.requestCoverage.safeForFinalAnswer, false);
+  assert.equal(result.requestCoverage.findings.find((item) => item.surface === "$75").status, "omitted");
+  assert.match(checked.body.result.content[0].text, /needs review/i);
+});
+
+test("the final-draft tool remains domain-neutral and accepts exact software evidence", async () => {
+  const checked = await call(toolCall("draft-software", "continuity_validate_draft", {
+    draft: "The implementation exports createCharacter(). [characters.ts](src/characters.ts:1)",
+    documents: [{ name: "src/characters.ts", text: "The implementation exports createCharacter()." }],
+  }));
+
+  const result = checked.body.result.structuredContent;
+  assert.equal(result.claimClosure.citations[0].status, "verified");
+  assert.equal(result.claimClosure.identifiers.find((item) => item.surface === "createCharacter()").status, "existing");
+  assert.equal(result.claimClosure.safeForFinalAnswer, true);
+  assert.match(checked.body.result.content[0].text, /passed/i);
 });
 
 test("uploaded text is exact-span verified through the keyless MCP context tool", async () => {
